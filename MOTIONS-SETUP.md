@@ -1,31 +1,48 @@
-# MUN Helper — Motions Library setup
+# MUNly — Supabase setup
 
-## 1. Create the database table
+## 1. Configure environment variables
 
-1. Open your Supabase project.
-2. Open **SQL Editor** and create a new query.
-3. Copy the full contents of `supabase/migrations/202610220001_create_motions.sql` into the query.
-4. Click **Run**.
+Copy `.env.example` to `.env` in the project root and set:
 
-The migration creates the private `public.motions` table, indexes, an `updated_at` trigger, and Row Level Security policies. Each signed-in user can only read, create, update, or delete their own motions. Anonymous users have no table access. The app does not need a service-role key.
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+```
 
-## 2. Start the app
+Use only your Supabase publishable/anon key in frontend code. Never place a service-role key or email-provider secret in `.env` variables prefixed with `VITE_`, commit secrets, or share your `.env` file.
 
-From the project folder, run:
+## 2. Create the database tables
+
+In your Supabase project, open **SQL Editor** and run both migrations, in this order:
+
+1. `supabase/migrations/202610220001_create_motions.sql`
+2. `supabase/migrations/202610230001_create_workspace_items.sql`
+
+The first creates the private Motions Library. The second creates the private workspace table for conferences, MUN Passport entries, notes, position papers, research documents, draft resolutions and speech drafts. Both migrations enable Row Level Security and restrict records to the signed-in user who owns them.
+
+## 3. Install and run
 
 ```bash
 npm install
 npm run dev
 ```
 
-Make sure your local `.env` contains `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Never commit or share `.env`.
+For a production build:
 
-## 3. Test the feature
+```bash
+npm run build
+```
 
-1. Sign in to MUN Helper.
-2. Open **Motions Library** and create a motion.
-3. Refresh the page; the motion should still be present.
-4. Edit it, favorite it, search for it, and delete it.
-5. If possible, sign in as a second test user and confirm that the first user's motions are not visible.
+## 4. Test
 
-If the app reports that the motions table is missing, run the SQL migration first. If a request is denied after the migration, check that you are signed in and that the correct Supabase project URL is in `.env`.
+1. Sign in and create a motion, then refresh the page.
+2. Create a conference, note, position paper, research note, resolution and speech draft.
+3. Refresh the page and confirm the items remain saved.
+4. Edit and delete test items.
+5. If possible, use a second test account to confirm it cannot see the first account's private records.
+
+If the app reports that a table does not exist, verify that both migrations were run in the correct Supabase project. If a request is denied, confirm that the user is signed in and the RLS policies are present.
+
+## Export and email notes
+
+PDF export opens the browser print dialog; choose **Save as PDF**. Word export downloads a simple Word-compatible `.doc` file (not a full `.docx`). The product-update setting stores a preference only; actual announcement delivery requires a separate trusted server-side email integration. Do not add email-provider secrets to frontend variables.

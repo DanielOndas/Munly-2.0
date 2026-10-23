@@ -1,523 +1,332 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
-  LayoutDashboard,
-  Library,
-  CalendarDays,
-  Globe2,
-  StickyNote,
-  BookOpen,
-  Settings,
-  Plus,
-  Search,
-  X,
-  LogOut,
-  LockKeyhole,
-  Mail,
-  ArrowLeft,
-  Loader2,
-  CheckCircle2,
+  LayoutDashboard, Library, CalendarDays, Globe2, StickyNote, BookOpen, Settings, MessageSquare,
+  Plus, Search, X, LogOut, LockKeyhole, Mail, ArrowLeft, Loader2, CheckCircle2,
+  FileText, StickyNote as ResearchIcon, ScrollText, Mic2, Download, ExternalLink, Star, Trash2,
+  Pencil, Clock3, ChevronRight, Menu, Save, Bell, ClipboardPaste, Sun, Moon, Gamepad2,
 } from 'lucide-react'
 import { supabase, supabaseConfigured } from './lib/supabase'
+import Simulator from './Simulator'
+import SnakeGame from './SnakeGame'
+import { motionPresets, type MotionPreset } from './motionPresets'
 
-type Page = 'dashboard' | 'motions' | 'conferences' | 'passport' | 'notes' | 'community' | 'settings'
+type Page = 'dashboard' | 'motions' | 'conferences' | 'passport' | 'notes' | 'community' | 'settings' | 'papers' | 'research' | 'resolutions' | 'speeches' | 'simulator'
 type AuthMode = 'login' | 'signup' | 'forgot' | 'update-password'
 type MotionRecord = {
-  id: string
-  user_id: string
-  title: string
-  explanation: string
-  category: string
-  motion_text: string | null
-  speaking_time_seconds: number | null
-  voting_threshold: string | null
-  precedence: string | null
-  source_url: string | null
-  personal_notes: string | null
-  is_favorite: boolean
-  created_at: string
-  updated_at: string
+  id: string; user_id: string; title: string; explanation: string; category: string; motion_text: string | null
+  speaking_time_seconds: number | null; voting_threshold: string | null; precedence: string | null; source_url: string | null
+  personal_notes: string | null; is_favorite: boolean; created_at: string; updated_at: string
 }
+type WorkspaceKind = 'conference' | 'passport' | 'note' | 'paper' | 'research' | 'resolution' | 'speech'
+type WorkspaceItem = { id: string; user_id: string; kind: WorkspaceKind; title: string; content: string; metadata: Record<string, string>; created_at: string; updated_at: string }
+type WorkspaceForm = { title: string; content: string; conference: string; committee: string; country: string; agenda: string; date: string; location: string; tags: string; source_url: string; status: string }
 type MotionForm = { title: string; explanation: string; category: string; motion_text: string; speaking_time_seconds: string; voting_threshold: string; precedence: string; source_url: string; personal_notes: string }
 const emptyMotionForm: MotionForm = { title: '', explanation: '', category: 'General Procedure', motion_text: '', speaking_time_seconds: '', voting_threshold: '', precedence: '', source_url: '', personal_notes: '' }
-const motionCategories = ['General Procedure', 'Debate', 'Caucus', 'Voting', 'Resolution', 'Points', 'Other']
+const emptyWorkspaceForm: WorkspaceForm = { title: '', content: '', conference: '', committee: '', country: '', agenda: '', date: '', location: '', tags: '', source_url: '', status: 'Draft' }
+const motionCategories = ['General Procedure', 'Speeches and Debate', 'Moderated Caucus', 'Unmoderated Caucus', 'Points and Questions', 'Draft Resolutions and Amendments', 'Voting Procedure', 'Suspension and Adjournment', 'Other', 'Debate', 'Caucus', 'Voting', 'Resolution', 'Points']
+const kindLabels: Record<WorkspaceKind, string> = { conference: 'Conference', passport: 'MUN Passport entry', note: 'Research note', paper: 'Position paper', research: 'Research document', resolution: 'Draft resolution', speech: 'Speech draft' }
+const pageInfo: Record<Page, { title: string; subtitle: string; kind?: WorkspaceKind; icon: typeof FileText }> = {
+  dashboard: { title: 'Your workspace', subtitle: 'Everything you need to prepare, organize and participate in MUN.', icon: LayoutDashboard },
+  motions: { title: 'Motions Library', subtitle: 'Keep your procedural motions, wording and personal notes together.', icon: Library },
+  conferences: { title: 'My Conferences', subtitle: 'Keep track of conferences, committees and important dates.', kind: 'conference', icon: CalendarDays },
+  passport: { title: 'MUN Passport', subtitle: 'Build a personal record of your MUN experience.', kind: 'passport', icon: Globe2 },
+  notes: { title: 'My Notes', subtitle: 'Capture ideas, preparation notes and useful information.', kind: 'note', icon: StickyNote },
+  community: { title: 'Community Resources', subtitle: 'A home for reusable guides and resources. Sharing can be added in a future phase.', icon: BookOpen },
+  settings: { title: 'Settings', subtitle: 'Manage your profile and notification preferences.', icon: Settings },
+  papers: { title: 'Position Papers', subtitle: 'Develop structured, well-supported country position papers.', kind: 'paper', icon: FileText },
+  research: { title: 'Research Workspace', subtitle: 'Organize evidence, links and research by topic or committee.', kind: 'research', icon: ResearchIcon },
+  resolutions: { title: 'Resolution Builder', subtitle: 'Draft preambulatory and operative clauses in one place.', kind: 'resolution', icon: ScrollText },
+  speeches: { title: 'Speech Writer', subtitle: 'Prepare and save speeches for different moments in committee.', kind: 'speech', icon: Mic2 },
+  simulator: { title: 'MUN Simulator', subtitle: 'Practice diplomacy, debate and resolution writing in a solo committee session.', icon: MessageSquare },
+}
+
+function formatDate(value: string) { return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) }
+function safeFilename(value: string) { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'munly-document' }
+function downloadDocument(title: string, content: string, format: 'doc' | 'txt') {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.6;max-width:800px;margin:48px auto;color:#222}h1{font-size:24px}pre{white-space:pre-wrap;font-family:Arial,sans-serif}</style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
+  const blob = new Blob([html], { type: format === 'doc' ? 'application/msword;charset=utf-8' : 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${safeFilename(title)}.${format}`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url)
+}
+function escapeHtml(value: string) { return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char)) }
+function exportPdf(title: string, content: string) {
+  const popup = window.open('', '_blank')
+  if (!popup) { alert('Please allow pop-ups to export this document as PDF.'); return }
+  popup.opener = null
+  popup.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.6;max-width:780px;margin:42px auto;color:#222;padding:0 20px}h1{font-size:24px}pre{white-space:pre-wrap;font:14px/1.65 Arial,sans-serif}@media print{body{margin:0 auto}}</style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(content)}</pre><script>window.onload=()=>window.print()<\/script></body></html>`)
+  popup.document.close()
+}
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [modalType, setModalType] = useState<'motion' | 'conference' | 'note' | null>(null)
+  const [snakeOpen, setSnakeOpen] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => { try { const saved = localStorage.getItem('munly-theme'); return saved === 'light' || saved === 'dark' ? saved : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') } catch { return 'dark' } })
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authMode, setAuthMode] = useState<AuthMode>('login')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [authError, setAuthError] = useState('')
-  const [authMessage, setAuthMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [motions, setMotions] = useState<MotionRecord[]>([])
-  const [motionsLoading, setMotionsLoading] = useState(false)
-  const [motionsError, setMotionsError] = useState('')
-  const [motionSearch, setMotionSearch] = useState('')
-  const [motionCategoryFilter, setMotionCategoryFilter] = useState('All categories')
-  const [favoritesOnly, setFavoritesOnly] = useState(false)
-  const [editingMotionId, setEditingMotionId] = useState<string | null>(null)
-  const [motionForm, setMotionForm] = useState<MotionForm>(emptyMotionForm)
-  const [motionSaving, setMotionSaving] = useState(false)
+  const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState('')
+  const [authError, setAuthError] = useState(''); const [authMessage, setAuthMessage] = useState(''); const [submitting, setSubmitting] = useState(false)
+  const [motions, setMotions] = useState<MotionRecord[]>([]); const [motionsLoading, setMotionsLoading] = useState(false); const [motionsError, setMotionsError] = useState('')
+  const [motionSearch, setMotionSearch] = useState(''); const [motionCategoryFilter, setMotionCategoryFilter] = useState('All categories'); const [favoritesOnly, setFavoritesOnly] = useState(false)
+  const [showPresets, setShowPresets] = useState(true); const [importOpen, setImportOpen] = useState(false); const [bulkText, setBulkText] = useState(''); const [importRows, setImportRows] = useState<Array<{ id: string; title: string; explanation: string; category: string; motion_text: string; duplicate: boolean; selected: boolean }>>([]); const [importMessage, setImportMessage] = useState(''); const [importSaving, setImportSaving] = useState(false); const [presetSavingId, setPresetSavingId] = useState<string | null>(null); const [presetMessage, setPresetMessage] = useState('')
+  const [editingMotionId, setEditingMotionId] = useState<string | null>(null); const [motionForm, setMotionForm] = useState<MotionForm>(emptyMotionForm); const [motionSaving, setMotionSaving] = useState(false)
+  const [workspaceItems, setWorkspaceItems] = useState<WorkspaceItem[]>([]); const [workspaceLoading, setWorkspaceLoading] = useState(false); const [workspaceError, setWorkspaceError] = useState('')
+  const [modalKind, setModalKind] = useState<WorkspaceKind | 'motion' | null>(null); const [isModalOpen, setIsModalOpen] = useState(false); const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [workspaceForm, setWorkspaceForm] = useState<WorkspaceForm>(emptyWorkspaceForm); const [workspaceSaving, setWorkspaceSaving] = useState(false)
+  const [search, setSearch] = useState(''); const [mobileNavOpen, setMobileNavOpen] = useState(false); const [emailUpdates, setEmailUpdates] = useState(false); const [settingsMessage, setSettingsMessage] = useState('')
 
   useEffect(() => {
-    if (!supabase) {
-      setAuthLoading(false)
-      return
-    }
+    document.documentElement.dataset.theme = theme
+    try { localStorage.setItem('munly-theme', theme) } catch {}
+  }, [theme])
+
+  useEffect(() => {
+    if (!supabase) { setAuthLoading(false); return }
     let mounted = true
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return
-      if (error) setAuthError(error.message)
-      setSession(data.session)
-      setAuthLoading(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      if (!mounted) return
-      setSession(nextSession)
-      if (event === 'PASSWORD_RECOVERY') setAuthMode('update-password')
-      if (nextSession) setAuthError('')
-    })
-    return () => {
-      mounted = false
-      subscription.unsubscribe()
-    }
+    supabase.auth.getSession().then(({ data, error }) => { if (!mounted) return; if (error) setAuthError(error.message); setSession(data.session); setAuthLoading(false) })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => { if (!mounted) return; setSession(nextSession); if (event === 'PASSWORD_RECOVERY') setAuthMode('update-password'); if (nextSession) setAuthError('') })
+    return () => { mounted = false; subscription.unsubscribe() }
   }, [])
 
   useEffect(() => {
-    if (!session?.user.id || !supabase) {
-      setMotions([])
-      setMotionsLoading(false)
-      return
-    }
+    setEmailUpdates(Boolean(session?.user.user_metadata?.email_product_updates))
+  }, [session?.user.id, session?.user.user_metadata?.email_product_updates])
+
+  useEffect(() => {
+    if (!session?.user.id || !supabase) { setMotions([]); setWorkspaceItems([]); setMotionsLoading(false); setWorkspaceLoading(false); return }
     let active = true
-    const loadMotions = async () => {
-      setMotionsLoading(true)
-      setMotionsError('')
-      const { data, error } = await supabase!
-        .from('motions')
-        .select('*')
-        .order('is_favorite', { ascending: false })
-        .order('updated_at', { ascending: false })
+    const load = async () => {
+      setMotionsLoading(true); setWorkspaceLoading(true); setMotionsError(''); setWorkspaceError('')
+      const [motionResult, itemResult] = await Promise.all([
+        supabase!.from('motions').select('*').order('is_favorite', { ascending: false }).order('updated_at', { ascending: false }),
+        supabase!.from('workspace_items').select('*').order('updated_at', { ascending: false }),
+      ])
       if (!active) return
-      if (error) {
-        setMotionsError(error.message.includes('relation') || error.message.includes('does not exist')
-          ? 'The motions table is not set up yet. Run the SQL migration included with this project in Supabase.'
-          : error.message)
-        setMotions([])
-      } else {
-        setMotions((data ?? []) as MotionRecord[])
-      }
-      setMotionsLoading(false)
+      if (motionResult.error) { const message = motionResult.error.message; setMotionsError(message.includes('relation') || message.includes('does not exist') ? 'The motions table is not set up yet. Run the included SQL migrations in Supabase.' : message); setMotions([]) } else setMotions((motionResult.data ?? []) as MotionRecord[])
+      if (itemResult.error) { const message = itemResult.error.message; setWorkspaceError(message.includes('relation') || message.includes('does not exist') ? 'Run the workspace_items SQL migration included with this project in Supabase to enable synced documents.' : message); setWorkspaceItems([]) } else setWorkspaceItems((itemResult.data ?? []) as WorkspaceItem[])
+      setMotionsLoading(false); setWorkspaceLoading(false)
     }
-    void loadMotions()
-    return () => { active = false }
+    void load(); return () => { active = false }
   }, [session?.user.id])
 
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'motions', label: 'Motions Library', icon: Library },
-    { id: 'conferences', label: 'My Conferences', icon: CalendarDays },
-    { id: 'passport', label: 'MUN Passport', icon: Globe2 },
-    { id: 'notes', label: 'My Notes', icon: StickyNote },
-    { id: 'community', label: 'Community Resources', icon: BookOpen },
-    { id: 'settings', label: 'Settings', icon: Settings },
+  const navGroups = [
+    { label: 'Workspace', items: [{ id: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard }, { id: 'conferences' as Page, label: 'My Conferences', icon: CalendarDays }, { id: 'passport' as Page, label: 'MUN Passport', icon: Globe2 }, { id: 'simulator' as Page, label: 'MUN Simulator', icon: MessageSquare }] },
+    { label: 'Preparation', items: [{ id: 'papers' as Page, label: 'Position Papers', icon: FileText }, { id: 'research' as Page, label: 'Research Notes', icon: ResearchIcon }, { id: 'resolutions' as Page, label: 'Resolution Builder', icon: ScrollText }, { id: 'speeches' as Page, label: 'Speech Writer', icon: Mic2 }, { id: 'motions' as Page, label: 'Motions Library', icon: Library }, { id: 'notes' as Page, label: 'My Notes', icon: StickyNote }] },
+    { label: 'More', items: [{ id: 'community' as Page, label: 'Community Resources', icon: BookOpen }, { id: 'settings' as Page, label: 'Settings', icon: Settings }] },
   ]
 
-  const openModal = (type: 'motion' | 'conference' | 'note') => {
-    setModalType(type)
-    if (type === 'motion') {
-      setEditingMotionId(null)
-      setMotionForm(emptyMotionForm)
-    }
-    setIsModalOpen(true)
-  }
-
-  const editMotion = (motion: MotionRecord) => {
-    setEditingMotionId(motion.id)
-    setMotionForm({
-      title: motion.title,
-      explanation: motion.explanation,
-      category: motion.category,
-      motion_text: motion.motion_text ?? '',
-      speaking_time_seconds: motion.speaking_time_seconds == null ? '' : String(motion.speaking_time_seconds),
-      voting_threshold: motion.voting_threshold ?? '',
-      precedence: motion.precedence ?? '',
-      source_url: motion.source_url ?? '',
-      personal_notes: motion.personal_notes ?? '',
-    })
-    setModalType('motion')
-    setIsModalOpen(true)
-  }
-
-  const saveMotion = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!supabase || !session?.user.id) {
-      setMotionsError('Please sign in before saving a motion.')
-      return
-    }
-    setMotionSaving(true)
-    setMotionsError('')
-    const payload = {
-      title: motionForm.title.trim(),
-      explanation: motionForm.explanation.trim(),
-      category: motionForm.category,
-      motion_text: motionForm.motion_text.trim() || null,
-      speaking_time_seconds: motionForm.speaking_time_seconds ? Number(motionForm.speaking_time_seconds) : null,
-      voting_threshold: motionForm.voting_threshold.trim() || null,
-      precedence: motionForm.precedence.trim() || null,
-      source_url: motionForm.source_url.trim() || null,
-      personal_notes: motionForm.personal_notes.trim() || null,
-    }
-    try {
-      if (editingMotionId) {
-        const { data, error } = await supabase.from('motions').update(payload).eq('id', editingMotionId).select('*').single()
-        if (error) throw error
-        setMotions(current => current.map(item => item.id === editingMotionId ? data as MotionRecord : item))
-      } else {
-        const { data, error } = await supabase.from('motions').insert({ ...payload, user_id: session.user.id }).select('*').single()
-        if (error) throw error
-        setMotions(current => [data as MotionRecord, ...current])
-      }
-      setIsModalOpen(false)
-      setEditingMotionId(null)
-      setMotionForm(emptyMotionForm)
-    } catch (error) {
-      setMotionsError(error instanceof Error ? error.message : 'Could not save this motion. Please try again.')
-    } finally {
-      setMotionSaving(false)
-    }
-  }
-
-  const deleteMotion = async (motion: MotionRecord) => {
-    if (!supabase || !window.confirm(`Delete “${motion.title}”? This cannot be undone.`)) return
-    setMotionsError('')
-    const { error } = await supabase.from('motions').delete().eq('id', motion.id)
-    if (error) setMotionsError(error.message)
-    else setMotions(current => current.filter(item => item.id !== motion.id))
-  }
-
-  const toggleMotionFavorite = async (motion: MotionRecord) => {
-    if (!supabase) return
-    const nextValue = !motion.is_favorite
-    setMotions(current => current.map(item => item.id === motion.id ? { ...item, is_favorite: nextValue } : item))
-    const { error } = await supabase.from('motions').update({ is_favorite: nextValue }).eq('id', motion.id)
-    if (error) {
-      setMotions(current => current.map(item => item.id === motion.id ? { ...item, is_favorite: motion.is_favorite } : item))
-      setMotionsError(`Could not update favorite: ${error.message}`)
-    }
-  }
-
-  const resetAuthMessages = () => {
-    setAuthError('')
-    setAuthMessage('')
-  }
-
+  const resetAuthMessages = () => { setAuthError(''); setAuthMessage('') }
   const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    resetAuthMessages()
-    if (!supabase) {
-      setAuthError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to your .env file, then restart the development server.')
-      return
-    }
+    event.preventDefault(); resetAuthMessages()
+    if (!supabase) { setAuthError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to your .env file, then restart the app.'); return }
     setSubmitting(true)
     try {
       if (authMode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            data: { display_name: displayName.trim() },
-            emailRedirectTo: window.location.origin,
-          },
-        })
+        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { display_name: displayName.trim(), email_product_updates: false }, emailRedirectTo: window.location.origin } })
         if (error) throw error
-        if (data.session) setAuthMessage('Your account has been created.')
-        else setAuthMessage('Check your email for the confirmation link to finish creating your account.')
-      } else if (authMode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-        if (error) throw error
-      } else if (authMode === 'forgot') {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: `${window.location.origin}/`,
-        })
-        if (error) throw error
-        setAuthMessage('If an account exists for that email, a password-reset link will be sent.')
-      } else {
-        const { error } = await supabase.auth.updateUser({ password })
-        if (error) throw error
-        setAuthMessage('Password updated successfully. You can continue using MUN Helper.')
-        setAuthMode('login')
-        setPassword('')
-      }
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Something went wrong. Please try again.')
-    } finally {
-      setSubmitting(false)
-    }
+        setAuthMessage(data.session ? 'Your account has been created.' : 'Check your email for the confirmation link to finish creating your account.')
+      } else if (authMode === 'login') { const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password }); if (error) throw error }
+      else if (authMode === 'forgot') { const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/` }); if (error) throw error; setAuthMessage('If an account exists for that email, a password-reset link will be sent.') }
+      else { const { error } = await supabase.auth.updateUser({ password }); if (error) throw error; setAuthMessage('Password updated successfully. You can continue using MUNly.'); setAuthMode('login'); setPassword('') }
+    } catch (error) { setAuthError(error instanceof Error ? error.message : 'Something went wrong. Please try again.') } finally { setSubmitting(false) }
+  }
+  const handleSignOut = async () => { if (!supabase) return; const { error } = await supabase.auth.signOut(); if (error) setAuthError(error.message); else { setCurrentPage('dashboard'); setPassword(''); setAuthMessage('') } }
+
+  const openMotion = (motion?: MotionRecord) => {
+    setModalKind('motion'); setEditingMotionId(motion?.id ?? null)
+    setMotionForm(motion ? { title: motion.title, explanation: motion.explanation, category: motion.category, motion_text: motion.motion_text ?? '', speaking_time_seconds: motion.speaking_time_seconds == null ? '' : String(motion.speaking_time_seconds), voting_threshold: motion.voting_threshold ?? '', precedence: motion.precedence ?? '', source_url: motion.source_url ?? '', personal_notes: motion.personal_notes ?? '' } : emptyMotionForm)
+    setMotionsError(''); setIsModalOpen(true)
+  }
+  const saveMotion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!supabase || !session?.user.id) { setMotionsError('Please sign in before saving a motion.'); return }
+    setMotionSaving(true); setMotionsError('')
+    const payload = { title: motionForm.title.trim(), explanation: motionForm.explanation.trim(), category: motionForm.category, motion_text: motionForm.motion_text.trim() || null, speaking_time_seconds: motionForm.speaking_time_seconds ? Number(motionForm.speaking_time_seconds) : null, voting_threshold: motionForm.voting_threshold.trim() || null, precedence: motionForm.precedence.trim() || null, source_url: motionForm.source_url.trim() || null, personal_notes: motionForm.personal_notes.trim() || null }
+    try {
+      if (editingMotionId) { const { data, error } = await supabase.from('motions').update(payload).eq('id', editingMotionId).select('*').single(); if (error) throw error; setMotions(items => items.map(item => item.id === editingMotionId ? data as MotionRecord : item)) }
+      else { const { data, error } = await supabase.from('motions').insert({ ...payload, user_id: session.user.id }).select('*').single(); if (error) throw error; setMotions(items => [data as MotionRecord, ...items]) }
+      setIsModalOpen(false); setEditingMotionId(null); setMotionForm(emptyMotionForm)
+    } catch (error) { setMotionsError(error instanceof Error ? error.message : 'Could not save this motion.') } finally { setMotionSaving(false) }
+  }
+  const deleteMotion = async (motion: MotionRecord) => { if (!supabase || !window.confirm(`Delete “${motion.title}”? This cannot be undone.`)) return; const { error } = await supabase.from('motions').delete().eq('id', motion.id); if (error) setMotionsError(error.message); else setMotions(items => items.filter(item => item.id !== motion.id)) }
+  const toggleMotionFavorite = async (motion: MotionRecord) => { if (!supabase) return; const value = !motion.is_favorite; setMotions(items => items.map(item => item.id === motion.id ? { ...item, is_favorite: value } : item)); const { error } = await supabase.from('motions').update({ is_favorite: value }).eq('id', motion.id); if (error) { setMotions(items => items.map(item => item.id === motion.id ? { ...item, is_favorite: motion.is_favorite } : item)); setMotionsError(error.message) } }
+
+  const classifyMotion = (title: string, text = '') => {
+    const value = `${title} ${text}`.toLowerCase()
+    if (/point of|parliamentary inquiry|personal privilege|point of order|question|clarif|right of reply/.test(value)) return 'Points and Questions'
+    if (/amend|draft resolution|operative clause|preambulatory|sponsor|signatory|resolution|clause/.test(value)) return 'Draft Resolutions and Amendments'
+    if (/vote|voting|roll.call|abstain|close debate/.test(value)) return 'Voting Procedure'
+    if (/unmoderated|informal|negotia|combine drafts|write a draft|gather support/.test(value)) return 'Unmoderated Caucus'
+    if (/moderated caucus|speaking time|focused discussion/.test(value)) return 'Moderated Caucus'
+    if (/suspend|adjourn|recess|break|resume|pause|extend the meeting|end the session/.test(value)) return 'Suspension and Adjournment'
+    if (/agenda|open debate|set the agenda|chair|meeting|session/.test(value)) return 'General Procedure'
+    if (/speaker|speech|debate|yield|speak|speakers list|question after/.test(value)) return 'Speeches and Debate'
+    return 'Other'
+  }
+  const prepareImport = () => {
+    const entries = bulkText.split(/\n+/).map(line => line.replace(/^\s*(?:[-*•]+|\d+[.)])\s*/, '').trim()).filter(Boolean)
+    const seen = new Set<string>()
+    const rows = entries.map((line, index) => {
+      const title = line.replace(/\s+/g, ' ').replace(/[.;]+$/, '')
+      const key = normaliseMotionKey(title)
+      const duplicate = seen.has(key) || existingMotionKeys.has(key)
+      seen.add(key)
+      return { id: `${index}-${key}`, title, explanation: 'Imported motion. Review this description and check your conference rules before using it.', category: classifyMotion(title), motion_text: title, duplicate, selected: !duplicate }
+    })
+    setImportRows(rows); setImportMessage(rows.length ? `${rows.length} motions found. Check the suggested categories before saving.` : 'Paste one motion per line to begin.')
+  }
+  const saveImportedMotions = async () => {
+    if (!supabase || !session?.user.id) { setImportMessage('Please sign in before saving motions.'); return }
+    const selected = importRows.filter(row => row.selected)
+    if (!selected.length) { setImportMessage('Select at least one motion to save.'); return }
+    setImportSaving(true); setImportMessage('')
+    try {
+      const payload = selected.map(row => ({ user_id: session.user.id, title: row.title, explanation: row.explanation, category: row.category, motion_text: row.motion_text || null, speaking_time_seconds: null, voting_threshold: null, precedence: null, source_url: null, personal_notes: null }))
+      const { data, error } = await supabase.from('motions').insert(payload).select('*')
+      if (error) throw error
+      setMotions(current => [...((data ?? []) as MotionRecord[]), ...current]); setImportMessage(`Saved ${(data ?? []).length} motions to your library.`); setImportRows([]); setBulkText('')
+    } catch (error) { setImportMessage(error instanceof Error ? error.message : 'Could not save the imported motions.') } finally { setImportSaving(false) }
+  }
+  const savePreset = async (preset: MotionPreset) => {
+    if (!supabase || !session?.user.id) { setPresetMessage('Please sign in before saving presets.'); return }
+    if (existingMotionKeys.has(normaliseMotionKey(preset.title))) { setPresetMessage(`“${preset.title}” is already in your library.`); return }
+    setPresetSavingId(preset.title); setPresetMessage('')
+    const { data, error } = await supabase.from('motions').insert({ user_id: session.user.id, title: preset.title, explanation: preset.explanation, category: preset.category, motion_text: preset.motion_text, speaking_time_seconds: null, voting_threshold: preset.voting_threshold, precedence: preset.precedence, source_url: null, personal_notes: 'Built-in MUNly preset. Check your conference rulebook; procedures can vary.' }).select('*').single()
+    if (error) setPresetMessage(error.message)
+    else { setMotions(current => [data as MotionRecord, ...current]); setPresetMessage(`Added “${preset.title}” to your library.`) }
+    setPresetSavingId(null)
+  }
+  const addAllPresets = async () => {
+    if (!supabase || !session?.user.id) { setPresetMessage('Please sign in before saving presets.'); return }
+    const existing = new Set(motions.map(m => normaliseMotionKey(m.title)))
+    const fresh = motionPresets.filter(p => !existing.has(normaliseMotionKey(p.title)))
+    if (!fresh.length) { setPresetMessage('All built-in presets are already in your library.'); return }
+    if (!window.confirm(`Add ${fresh.length} built-in motions to your library? Existing matching titles will be skipped.`)) return
+    setPresetSavingId('__all__'); setPresetMessage('')
+    const payload = fresh.map(p => ({ user_id: session.user.id, title: p.title, explanation: p.explanation, category: p.category, motion_text: p.motion_text, speaking_time_seconds: null, voting_threshold: p.voting_threshold, precedence: p.precedence, source_url: null, personal_notes: 'Built-in MUNly preset. Check your conference rulebook; procedures can vary.' }))
+    try {
+      const { data, error } = await supabase.from('motions').insert(payload).select('*')
+      if (error) throw error
+      setMotions(current => [...((data ?? []) as MotionRecord[]), ...current]); setPresetMessage(`Added ${(data ?? []).length} presets to your library.`)
+    } catch (error) { setPresetMessage(error instanceof Error ? error.message : 'Could not add presets.') } finally { setPresetSavingId(null) }
   }
 
-  const handleSignOut = async () => {
-    if (!supabase) return
-    const { error } = await supabase.auth.signOut()
-    if (error) setAuthError(error.message)
-    else {
-      setCurrentPage('dashboard')
-      setPassword('')
-      setAuthMessage('')
-    }
+  const openWorkspace = (kind: WorkspaceKind, item?: WorkspaceItem) => {
+    setModalKind(kind); setEditingItemId(item?.id ?? null)
+    const meta = item?.metadata ?? {}
+    setWorkspaceForm(item ? { title: item.title, content: item.content ?? '', conference: meta.conference ?? '', committee: meta.committee ?? '', country: meta.country ?? '', agenda: meta.agenda ?? '', date: meta.date ?? '', location: meta.location ?? '', tags: meta.tags ?? '', source_url: meta.source_url ?? '', status: meta.status ?? 'Draft' } : { ...emptyWorkspaceForm, title: kind === 'paper' ? 'Position Paper' : kind === 'resolution' ? 'Draft Resolution' : kind === 'speech' ? 'Opening Speech' : '' })
+    setWorkspaceError(''); setIsModalOpen(true)
   }
+  const saveWorkspaceItem = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!supabase || !session?.user.id || !modalKind || modalKind === 'motion') { setWorkspaceError('Please sign in before saving.'); return }
+    setWorkspaceSaving(true); setWorkspaceError('')
+    const metadata = { conference: workspaceForm.conference.trim(), committee: workspaceForm.committee.trim(), country: workspaceForm.country.trim(), agenda: workspaceForm.agenda.trim(), date: workspaceForm.date, location: workspaceForm.location.trim(), tags: workspaceForm.tags.trim(), source_url: workspaceForm.source_url.trim(), status: workspaceForm.status }
+    const payload = { user_id: session.user.id, kind: modalKind, title: workspaceForm.title.trim(), content: workspaceForm.content, metadata }
+    try {
+      if (editingItemId) { const { data, error } = await supabase.from('workspace_items').update({ title: payload.title, content: payload.content, metadata: payload.metadata }).eq('id', editingItemId).select('*').single(); if (error) throw error; setWorkspaceItems(items => items.map(item => item.id === editingItemId ? data as WorkspaceItem : item)) }
+      else { const { data, error } = await supabase.from('workspace_items').insert(payload).select('*').single(); if (error) throw error; setWorkspaceItems(items => [data as WorkspaceItem, ...items]) }
+      setIsModalOpen(false); setEditingItemId(null); setWorkspaceForm(emptyWorkspaceForm)
+    } catch (error) { setWorkspaceError(error instanceof Error ? error.message : 'Could not save this item. Check that the workspace migration has been applied.') } finally { setWorkspaceSaving(false) }
+  }
+  const deleteWorkspaceItem = async (item: WorkspaceItem) => { if (!supabase || !window.confirm(`Delete “${item.title}”? This cannot be undone.`)) return; const { error } = await supabase.from('workspace_items').delete().eq('id', item.id); if (error) setWorkspaceError(error.message); else setWorkspaceItems(items => items.filter(value => value.id !== item.id)) }
+  const saveSettings = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!supabase) return; setSettingsMessage(''); const { error } = await supabase.auth.updateUser({ data: { ...session?.user.user_metadata, email_product_updates: emailUpdates } }); if (error) setSettingsMessage(`Could not save preferences: ${error.message}`); else setSettingsMessage('Preferences saved to your account. Product announcement emails still require an email provider to be configured.') }
+
+  const visibleMotions = useMemo(() => motions.filter(motion => (!motionSearch || `${motion.title} ${motion.explanation} ${motion.category}`.toLowerCase().includes(motionSearch.toLowerCase())) && (motionCategoryFilter === 'All categories' || motion.category === motionCategoryFilter) && (!favoritesOnly || motion.is_favorite)), [motions, motionSearch, motionCategoryFilter, favoritesOnly])
+  const visiblePresets = useMemo(() => motionPresets.filter(motion => (!motionSearch || `${motion.title} ${motion.explanation} ${motion.category}`.toLowerCase().includes(motionSearch.toLowerCase())) && (motionCategoryFilter === 'All categories' || motion.category === motionCategoryFilter) && !favoritesOnly), [motionSearch, motionCategoryFilter, favoritesOnly])
+  const normaliseMotionKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ')
+  const existingMotionKeys = useMemo(() => new Set(motions.map(m => normaliseMotionKey(m.title))), [motions])
+  const currentItems = useMemo(() => workspaceItems.filter(item => item.kind === pageInfo[currentPage].kind && (!search || `${item.title} ${item.content} ${Object.values(item.metadata ?? {}).join(' ')}`.toLowerCase().includes(search.toLowerCase()))), [workspaceItems, currentPage, search])
+  const allDocuments = workspaceItems.filter(item => ['paper', 'research', 'resolution', 'speech', 'note'].includes(item.kind))
+  const upcoming = workspaceItems.filter(item => item.kind === 'conference' && item.metadata?.date && new Date(item.metadata.date) >= new Date(new Date().toDateString())).sort((a, b) => (a.metadata.date || '').localeCompare(b.metadata.date || ''))
+  const displayNameValue = session?.user.user_metadata?.display_name || session?.user.email?.split('@')[0] || 'Delegate'
+
+  const inputClass = 'field w-full rounded-xl px-3.5 py-2.5 text-sm transition'
+  const labelClass = 'block text-sm font-medium text-[var(--text)] mb-1.5'
+  const buttonGold = 'btn-gold inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50'
+  const buttonSecondary = 'btn-secondary inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition'
 
   const renderAuth = () => {
-    const isSignup = authMode === 'signup'
-    const isForgot = authMode === 'forgot'
-    const isUpdatePassword = authMode === 'update-password'
+    const isSignup = authMode === 'signup'; const isForgot = authMode === 'forgot'; const isUpdatePassword = authMode === 'update-password'
     const title = isSignup ? 'Create your account' : isForgot ? 'Reset your password' : isUpdatePassword ? 'Choose a new password' : 'Welcome back'
-    const subtitle = isSignup
-      ? 'Create an account to keep your MUN preparation together.'
-      : isForgot
-        ? 'We’ll send you a link to reset your password.'
-        : isUpdatePassword
-          ? 'Choose a new password for your account.'
-          : 'Sign in to continue to your MUN workspace.'
-
-    return (
-      <div className="min-h-screen bg-[#f9fafb] flex items-center justify-center px-4 py-10">
-        <div className="w-full max-w-md">
-          <div className="flex justify-center mb-8">
-            <div className="flex items-center gap-2 text-charcoal">
-              <Globe2 className="text-accent" size={30} />
-              <span className="text-2xl font-bold tracking-tight">MUN Helper</span>
+    const subtitle = isSignup ? 'Create an account to keep your MUN preparation together.' : isForgot ? 'We’ll send you a link to reset your password.' : isUpdatePassword ? 'Choose a new password for your account.' : 'Sign in to continue to your MUN workspace.'
+    return <div className="auth-shell auth-page min-h-screen flex items-center justify-center px-4 py-8">
+      <div className="auth-frame w-full max-w-6xl">
+        <div className="auth-topline"><div className="brand-mark"><span className="brand-icon"><Globe2 size={23} /></span><span>MUNly</span></div></div>
+        <div className="auth-card">
+          <aside className="auth-story-panel">
+            <div className="auth-orbit auth-orbit-one" /><div className="auth-orbit auth-orbit-two" />
+            <div className="auth-story-content">
+              
+              <h2>Make every<br /><span>delegate moment</span><br />count.</h2>
+              <p>Prepare your speeches. Organize your research. Walk into committee ready.</p>
+              <div className="auth-feature-list"><div><span className="auth-feature-number">01</span><span><strong>Prepare with purpose</strong><small>Notes, research and position papers in one place.</small></span></div><div><span className="auth-feature-number">02</span><span><strong>Know your procedure</strong><small>Find motions and understand what to say.</small></span></div><div><span className="auth-feature-number">03</span><span><strong>Practice with confidence</strong><small>Build your skills before committee begins.</small></span></div></div>
             </div>
-          </div>
-          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-7 sm:p-8">
-            <div className="mb-6">
-              <div className="w-11 h-11 rounded-xl bg-blue-50 text-accent flex items-center justify-center mb-4">
-                {isForgot || isUpdatePassword ? <LockKeyhole size={21} /> : <Mail size={21} />}
-              </div>
-              <h1 className="text-2xl font-semibold text-charcoal">{title}</h1>
-              <p className="text-sm text-gray-500 mt-2 leading-6">{subtitle}</p>
+            
+          </aside>
+          <section className="auth-form-panel">
+            <div className="auth-form-inner">
+              
+              <h1>{title}</h1><p className="auth-form-subtitle">{subtitle}</p>
+              {!supabaseConfigured && <div className="alert-warning mb-5 rounded-xl p-3 text-sm"><strong>Supabase setup needed.</strong><p className="mt-1">Add your Supabase URL and publishable key to a <code>.env</code> file in the project root, then restart the app.</p></div>}
+              {authError && <div role="alert" className="alert-error mb-4 rounded-xl px-3 py-2.5 text-sm">{authError}</div>}{authMessage && <div role="status" className="alert-success mb-4 rounded-xl px-3 py-2.5 text-sm flex gap-2"><CheckCircle2 size={18} className="shrink-0 mt-0.5" /><span>{authMessage}</span></div>}
+              <form onSubmit={handleAuthSubmit} className="auth-form-fields">{isSignup && <div><label htmlFor="displayName" className={labelClass}>Display name</label><input id="displayName" value={displayName} onChange={e => setDisplayName(e.target.value)} autoComplete="name" required maxLength={80} className={inputClass} placeholder="Your name" /></div>}{!isUpdatePassword && <div><label htmlFor="email" className={labelClass}>Email address</label><input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" required className={inputClass} placeholder="you@example.com" /></div>}{!isForgot && <div><label htmlFor="password" className={labelClass}>{isUpdatePassword ? 'New password' : 'Password'}</label><input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete={isUpdatePassword || isSignup ? 'new-password' : 'current-password'} minLength={6} required className={inputClass} placeholder="At least 6 characters" /></div>}{authMode === 'login' && <div className="auth-forgot-row"><button type="button" onClick={() => { resetAuthMessages(); setAuthMode('forgot') }} className="gold-link">Forgot password?</button></div>}<button type="submit" disabled={submitting || !supabaseConfigured} className={`${buttonGold} auth-submit`}>{submitting && <Loader2 className="animate-spin" size={17} />}{submitting ? 'Please wait…' : isSignup ? 'Create account' : isForgot ? 'Send reset link' : isUpdatePassword ? 'Update password' : 'Sign in'}<ChevronRight size={17} /></button></form>
+              {!isForgot && !isUpdatePassword && <p className="auth-switch-text">{isSignup ? 'Already have an account?' : 'New to MUNly?'}{' '}<button onClick={() => { resetAuthMessages(); setPassword(''); setAuthMode(isSignup ? 'login' : 'signup') }} className="gold-link font-semibold">{isSignup ? 'Sign in' : 'Create an account'}</button></p>}{(isForgot || isUpdatePassword) && <button onClick={() => { resetAuthMessages(); setPassword(''); setAuthMode('login') }} className="muted flex items-center justify-center gap-2 text-sm mx-auto mt-6"><ArrowLeft size={15} /> Back to sign in</button>}
+              
             </div>
-
-            {!supabaseConfigured && (
-              <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                <strong>Supabase setup needed.</strong>
-                <p className="mt-1">Add your Supabase URL and publishable key to a <code>.env</code> file in the project root, then restart the app.</p>
-              </div>
-            )}
-
-            {authError && <div role="alert" className="mb-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2.5 text-sm text-red-700">{authError}</div>}
-            {authMessage && <div role="status" className="mb-4 rounded-lg border border-green-100 bg-green-50 px-3 py-2.5 text-sm text-green-800 flex gap-2"><CheckCircle2 size={18} className="shrink-0 mt-0.5" /><span>{authMessage}</span></div>}
-
-            <form onSubmit={handleAuthSubmit} className="space-y-4">
-              {isSignup && (
-                <div>
-                  <label htmlFor="displayName" className="block text-sm font-medium text-gray-700 mb-1.5">Display name</label>
-                  <input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" required maxLength={80} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="Your name" />
-                </div>
-              )}
-              {!isUpdatePassword && (
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
-                  <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="you@example.com" />
-                </div>
-              )}
-              {!isForgot && (
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">{isUpdatePassword ? 'New password' : 'Password'}</label>
-                  <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={isUpdatePassword ? 'new-password' : isSignup ? 'new-password' : 'current-password'} minLength={6} required className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder={isUpdatePassword ? 'At least 6 characters' : 'Enter your password'} />
-                </div>
-              )}
-              {authMode === 'login' && (
-                <div className="text-right -mt-1">
-                  <button type="button" onClick={() => { resetAuthMessages(); setAuthMode('forgot') }} className="text-sm text-accent hover:underline">Forgot password?</button>
-                </div>
-              )}
-              <button type="submit" disabled={submitting || !supabaseConfigured} className="w-full flex justify-center items-center gap-2 bg-accent text-white rounded-lg py-2.5 font-medium hover:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                {submitting && <Loader2 className="animate-spin" size={17} />}
-                {submitting ? 'Please wait…' : isSignup ? 'Create account' : isForgot ? 'Send reset link' : isUpdatePassword ? 'Update password' : 'Sign in'}
-              </button>
-            </form>
-
-            {!isForgot && !isUpdatePassword && (
-              <p className="text-sm text-center text-gray-500 mt-6">
-                {isSignup ? 'Already have an account?' : 'New to MUN Helper?'}{' '}
-                <button onClick={() => { resetAuthMessages(); setPassword(''); setAuthMode(isSignup ? 'login' : 'signup') }} className="font-medium text-accent hover:underline">
-                  {isSignup ? 'Sign in' : 'Create an account'}
-                </button>
-              </p>
-            )}
-            {(isForgot || isUpdatePassword) && (
-              <button onClick={() => { resetAuthMessages(); setPassword(''); setAuthMode('login') }} className="flex items-center justify-center gap-2 text-sm text-gray-500 hover:text-gray-800 mx-auto mt-6">
-                <ArrowLeft size={15} /> Back to sign in
-              </button>
-            )}
-          </div>
-          <p className="text-center text-xs text-gray-400 mt-5">Your MUN workspace, all in one place.</p>
+          </section>
         </div>
+        <div className="auth-page-footer"><span>© MUNly</span><span>A clearer way to prepare for MUN.</span></div>
       </div>
-    )
+    </div>
   }
 
-  const renderModal = () => {
-    if (!isModalOpen) return null
-    const isMotion = modalType === 'motion'
-    return (
-      <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in-up" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsModalOpen(false) }}>
-        <div role="dialog" aria-modal="true" aria-labelledby="modal-title" className="bg-white p-6 rounded-xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto border border-gray-100">
-          <div className="flex justify-between items-center mb-5">
-            <h3 id="modal-title" className="text-lg font-semibold text-charcoal">
-              {isMotion ? (editingMotionId ? 'Edit Motion' : 'Add Motion of Procedure') : modalType === 'conference' ? 'New Conference' : 'New Note'}
-            </h3>
-            <button type="button" onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="Close dialog"><X size={20} /></button>
-          </div>
-          {isMotion ? (
-            <form onSubmit={saveMotion} className="space-y-4">
-              <div>
-                <label htmlFor="motion-title" className="block text-sm font-medium text-gray-700 mb-1">Motion name *</label>
-                <input id="motion-title" required maxLength={160} value={motionForm.title} onChange={e => setMotionForm(v => ({ ...v, title: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="e.g. Motion for a moderated caucus" />
-              </div>
-              <div>
-                <label htmlFor="motion-category" className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-                <select id="motion-category" value={motionForm.category} onChange={e => setMotionForm(v => ({ ...v, category: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent">{motionCategories.map(category => <option key={category}>{category}</option>)}</select>
-              </div>
-              <div>
-                <label htmlFor="motion-explanation" className="block text-sm font-medium text-gray-700 mb-1">Explanation *</label>
-                <textarea id="motion-explanation" required rows={3} maxLength={8000} value={motionForm.explanation} onChange={e => setMotionForm(v => ({ ...v, explanation: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="What does this motion do, and when should you use it?" />
-              </div>
-              <div>
-                <label htmlFor="motion-wording" className="block text-sm font-medium text-gray-700 mb-1">Suggested wording <span className="text-gray-400 font-normal">(optional)</span></label>
-                <textarea id="motion-wording" rows={2} maxLength={4000} value={motionForm.motion_text} onChange={e => setMotionForm(v => ({ ...v, motion_text: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="The delegate of… moves for…" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="motion-speaking-time" className="block text-sm font-medium text-gray-700 mb-1">Speaking time (seconds)</label>
-                  <input id="motion-speaking-time" type="number" min="1" max="3600" value={motionForm.speaking_time_seconds} onChange={e => setMotionForm(v => ({ ...v, speaking_time_seconds: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="e.g. 60" />
-                </div>
-                <div>
-                  <label htmlFor="motion-voting" className="block text-sm font-medium text-gray-700 mb-1">Voting threshold</label>
-                  <input id="motion-voting" maxLength={120} value={motionForm.voting_threshold} onChange={e => setMotionForm(v => ({ ...v, voting_threshold: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="e.g. Simple majority" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="motion-precedence" className="block text-sm font-medium text-gray-700 mb-1">Precedence</label>
-                  <input id="motion-precedence" maxLength={120} value={motionForm.precedence} onChange={e => setMotionForm(v => ({ ...v, precedence: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="e.g. Before other motions" />
-                </div>
-                <div>
-                  <label htmlFor="motion-source" className="block text-sm font-medium text-gray-700 mb-1">Source URL</label>
-                  <input id="motion-source" type="url" maxLength={2000} value={motionForm.source_url} onChange={e => setMotionForm(v => ({ ...v, source_url: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="https://…" />
-                </div>
-              </div>
-              <div>
-                <label htmlFor="motion-notes" className="block text-sm font-medium text-gray-700 mb-1">My notes <span className="text-gray-400 font-normal">(optional)</span></label>
-                <textarea id="motion-notes" rows={2} maxLength={8000} value={motionForm.personal_notes} onChange={e => setMotionForm(v => ({ ...v, personal_notes: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2.5 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent" placeholder="Notes for your own preparation…" />
-              </div>
-              {motionsError && <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{motionsError}</div>}
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={motionSaving} className="min-w-32 flex justify-center items-center gap-2 bg-accent text-white rounded-lg px-4 py-2 font-medium hover:bg-blue-900 disabled:opacity-60">{motionSaving && <Loader2 size={16} className="animate-spin" />}{motionSaving ? 'Saving…' : editingMotionId ? 'Save changes' : 'Save motion'}</button>
-              </div>
-            </form>
-          ) : (
-            <form onSubmit={(e) => { e.preventDefault(); setIsModalOpen(false) }} className="space-y-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">{modalType === 'conference' ? 'Conference Name' : 'Note Title'}</label><input required type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors" placeholder="Enter details..." /></div>
-              <p className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">Saving conferences and notes will be implemented in a later step. This form does not save data yet.</p>
-              <button type="submit" className="w-full bg-accent text-white rounded-lg py-2 font-medium hover:bg-blue-900 transition-colors">Close</button>
-            </form>
-          )}
-        </div>
-      </div>
-    )
+  const renderMotionModal = () => <form onSubmit={saveMotion} className="space-y-4"><div><label className={labelClass}>Motion name *</label><input required maxLength={160} value={motionForm.title} onChange={e => setMotionForm(v => ({ ...v, title: e.target.value }))} className={inputClass} placeholder="e.g. Motion for a moderated caucus" /></div><div><label className={labelClass}>Category *</label><select value={motionForm.category} onChange={e => setMotionForm(v => ({ ...v, category: e.target.value }))} className={inputClass}>{motionCategories.map(category => <option key={category}>{category}</option>)}</select></div><div><label className={labelClass}>Explanation *</label><textarea required rows={3} maxLength={8000} value={motionForm.explanation} onChange={e => setMotionForm(v => ({ ...v, explanation: e.target.value }))} className={inputClass} placeholder="What does this motion do, and when should you use it?" /></div><div><label className={labelClass}>Suggested wording</label><textarea rows={2} maxLength={4000} value={motionForm.motion_text} onChange={e => setMotionForm(v => ({ ...v, motion_text: e.target.value }))} className={inputClass} placeholder="The delegate of… moves for…" /></div><div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Speaking time (seconds)</label><input type="number" min="1" max="3600" value={motionForm.speaking_time_seconds} onChange={e => setMotionForm(v => ({ ...v, speaking_time_seconds: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Voting threshold</label><input value={motionForm.voting_threshold} onChange={e => setMotionForm(v => ({ ...v, voting_threshold: e.target.value }))} className={inputClass} placeholder="e.g. Simple majority" /></div></div><div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Precedence</label><input value={motionForm.precedence} onChange={e => setMotionForm(v => ({ ...v, precedence: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Source URL</label><input type="url" value={motionForm.source_url} onChange={e => setMotionForm(v => ({ ...v, source_url: e.target.value }))} className={inputClass} placeholder="https://…" /></div></div><div><label className={labelClass}>Personal notes</label><textarea rows={2} value={motionForm.personal_notes} onChange={e => setMotionForm(v => ({ ...v, personal_notes: e.target.value }))} className={inputClass} /></div>{motionsError && <div className="alert-error rounded-xl p-3 text-sm">{motionsError}</div>}<div className="flex justify-end gap-3 pt-2"><button type="button" onClick={() => setIsModalOpen(false)} className={buttonSecondary}>Cancel</button><button type="submit" disabled={motionSaving} className={buttonGold}>{motionSaving && <Loader2 size={16} className="animate-spin" />}{motionSaving ? 'Saving…' : editingMotionId ? 'Save changes' : 'Save motion'}</button></div></form>
+
+  const renderWorkspaceModal = () => {
+    if (!modalKind || modalKind === 'motion') return null
+    const kind = modalKind; const isPaper = kind === 'paper'; const isResolution = kind === 'resolution'; const isSpeech = kind === 'speech'; const isConference = kind === 'conference'; const isPassport = kind === 'passport'; const isNote = kind === 'note'; const isResearch = kind === 'research'
+    const contentLabel = isResolution ? 'Resolution clauses' : isPaper ? 'Position paper draft' : isSpeech ? 'Speech draft' : isConference ? 'Preparation notes' : isPassport ? 'Reflection / role / achievements' : 'Notes and research'
+    const placeholder = isPaper ? 'Committee: …\nTopic: …\n\nI. Country policy and background\n\nII. Previous international action\n\nIII. Proposed solutions\n\nSources:\n- ' : isResolution ? 'Preambulatory clauses\n- Recalling …\n- Recognizing …\n\nOperative clauses\n1. Encourages …\n2. Calls upon …\n   a. …\n   b. …' : isSpeech ? 'Honourable Chair, distinguished delegates,\n\n[State your country’s position]\n\n[Present your key argument and evidence]\n\n[Propose a practical solution]\n\nThank you.' : isResearch ? 'Research question:\n\nKey findings:\n\nEvidence and sources:\n- ' : 'Write your details here…'
+    return <form onSubmit={saveWorkspaceItem} className="space-y-4"><div><label className={labelClass}>Title *</label><input required maxLength={200} value={workspaceForm.title} onChange={e => setWorkspaceForm(v => ({ ...v, title: e.target.value }))} className={inputClass} placeholder={`Name this ${kindLabels[kind].toLowerCase()}`} /></div>
+      {(isPaper || isResolution || isSpeech || isResearch || isNote) && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Conference</label><input value={workspaceForm.conference} onChange={e => setWorkspaceForm(v => ({ ...v, conference: e.target.value }))} className={inputClass} placeholder="Conference name" /></div><div><label className={labelClass}>Committee</label><input value={workspaceForm.committee} onChange={e => setWorkspaceForm(v => ({ ...v, committee: e.target.value }))} className={inputClass} placeholder="e.g. WHO, UNHRC" /></div></div>}
+      {isPaper && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Country / delegation</label><input value={workspaceForm.country} onChange={e => setWorkspaceForm(v => ({ ...v, country: e.target.value }))} className={inputClass} placeholder="Country" /></div><div><label className={labelClass}>Agenda topic</label><input value={workspaceForm.agenda} onChange={e => setWorkspaceForm(v => ({ ...v, agenda: e.target.value }))} className={inputClass} placeholder="Agenda item" /></div></div>}
+      {isConference && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Date</label><input type="date" value={workspaceForm.date} onChange={e => setWorkspaceForm(v => ({ ...v, date: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Location</label><input value={workspaceForm.location} onChange={e => setWorkspaceForm(v => ({ ...v, location: e.target.value }))} className={inputClass} placeholder="City / venue" /></div><div><label className={labelClass}>Committee</label><input value={workspaceForm.committee} onChange={e => setWorkspaceForm(v => ({ ...v, committee: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Status</label><select value={workspaceForm.status} onChange={e => setWorkspaceForm(v => ({ ...v, status: e.target.value }))} className={inputClass}><option>Planning</option><option>Registered</option><option>Attending</option><option>Completed</option></select></div></div>}
+      {isPassport && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Date</label><input type="date" value={workspaceForm.date} onChange={e => setWorkspaceForm(v => ({ ...v, date: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Role / country</label><input value={workspaceForm.country} onChange={e => setWorkspaceForm(v => ({ ...v, country: e.target.value }))} className={inputClass} placeholder="Delegate, chair, country…" /></div><div><label className={labelClass}>Committee</label><input value={workspaceForm.committee} onChange={e => setWorkspaceForm(v => ({ ...v, committee: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Conference / location</label><input value={workspaceForm.location} onChange={e => setWorkspaceForm(v => ({ ...v, location: e.target.value }))} className={inputClass} /></div></div>}
+      {isResearch && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Tags</label><input value={workspaceForm.tags} onChange={e => setWorkspaceForm(v => ({ ...v, tags: e.target.value }))} className={inputClass} placeholder="climate, sanctions, security" /></div><div><label className={labelClass}>Source URL</label><input type="url" value={workspaceForm.source_url} onChange={e => setWorkspaceForm(v => ({ ...v, source_url: e.target.value }))} className={inputClass} placeholder="https://…" /></div></div>}
+      <div><div className="flex items-center justify-between mb-1.5"><label className={labelClass}>{contentLabel}</label><span className="muted text-xs">Plain text supported</span></div><textarea rows={isPaper || isResolution || isSpeech ? 13 : 8} value={workspaceForm.content} onChange={e => setWorkspaceForm(v => ({ ...v, content: e.target.value }))} className={`${inputClass} editor-area`} placeholder={placeholder} /></div>
+      {workspaceError && <div role="alert" className="alert-error rounded-xl p-3 text-sm">{workspaceError}</div>}<div className="flex justify-between items-center gap-3 pt-2"><span className="muted text-xs">Private to your account</span><div className="flex gap-2"><button type="button" onClick={() => setIsModalOpen(false)} className={buttonSecondary}>Cancel</button><button type="submit" disabled={workspaceSaving} className={buttonGold}>{workspaceSaving && <Loader2 size={16} className="animate-spin" />}{workspaceSaving ? 'Saving…' : editingItemId ? 'Save changes' : 'Save to MUNly'}</button></div></div></form>
   }
 
+  const itemCard = (item: WorkspaceItem) => <article key={item.id} className="panel item-card rounded-2xl p-5"><div className="flex items-start gap-3"><div className="icon-tile shrink-0"><FileText size={19} /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold break-words">{item.title}</h3><p className="muted text-xs mt-1">Updated {formatDate(item.updated_at)}{item.metadata?.committee ? ` · ${item.metadata.committee}` : ''}</p></div><span className="status-chip">{item.metadata?.status || kindLabels[item.kind]}</span></div>{item.content && <p className="muted text-sm mt-3 whitespace-pre-wrap line-clamp-3">{item.content.slice(0, 240)}{item.content.length > 240 ? '…' : ''}</p>}{item.metadata?.source_url && <a href={item.metadata.source_url} target="_blank" rel="noreferrer" className="gold-link text-xs inline-flex items-center gap-1 mt-3">Source <ExternalLink size={12} /></a>}<div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-[var(--border)]"><button onClick={() => openWorkspace(item.kind, item)} className={buttonSecondary}><Pencil size={14} /> Edit</button>{['paper', 'resolution', 'speech', 'research', 'note'].includes(item.kind) && <><button onClick={() => exportPdf(item.title, item.content)} className={buttonSecondary}><Download size={14} /> PDF</button><button onClick={() => downloadDocument(item.title, item.content, 'doc')} className={buttonSecondary}><Download size={14} /> Word</button></>}<button onClick={() => void deleteWorkspaceItem(item)} className="btn-danger ml-auto"><Trash2 size={14} /> Delete</button></div></div></div></article>
 
   const renderPageContent = () => {
-    switch (currentPage) {
-      case 'dashboard':
-        return (
-          <div className="animate-fade-in-up space-y-8">
-            <header>
-              <h1 className="text-2xl font-semibold text-charcoal">Welcome to MUN Helper</h1>
-              <p className="text-gray-500 mt-1">Your workspace for MUN preparation.</p>
-            </header>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <button onClick={() => openModal('motion')} className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm hover:border-gray-200 transition-all smooth"><div className="p-2 bg-blue-50 text-accent rounded-lg"><Plus size={20} /></div><span className="font-medium text-gray-700">New Motion</span></button>
-              <button onClick={() => openModal('conference')} className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm hover:border-gray-200 transition-all smooth"><div className="p-2 bg-blue-50 text-accent rounded-lg"><CalendarDays size={20} /></div><span className="font-medium text-gray-700">New Conference</span></button>
-              <button onClick={() => openModal('note')} className="flex items-center gap-3 p-4 bg-white border border-gray-100 rounded-xl hover:shadow-sm hover:border-gray-200 transition-all smooth"><div className="p-2 bg-blue-50 text-accent rounded-lg"><StickyNote size={20} /></div><span className="font-medium text-gray-700">New Note</span></button>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <section className="bg-white p-6 rounded-xl border border-gray-100"><h2 className="text-lg font-medium text-charcoal mb-4">Upcoming Conferences</h2><div className="text-center py-8 text-gray-400 text-sm">No upcoming conferences scheduled.</div></section>
-              <section className="bg-white p-6 rounded-xl border border-gray-100"><h2 className="text-lg font-medium text-charcoal mb-4">Preparation Checklist</h2><div className="text-center py-8 text-gray-400 text-sm">Add a conference to generate checklists.</div></section>
-            </div>
-          </div>
-        )
-      case 'motions': {
-        const normalizedSearch = motionSearch.trim().toLowerCase()
-        const visibleMotions = motions.filter(motion => {
-          const matchesSearch = !normalizedSearch || [motion.title, motion.explanation, motion.category, motion.motion_text ?? '', motion.personal_notes ?? ''].some(value => value.toLowerCase().includes(normalizedSearch))
-          const matchesCategory = motionCategoryFilter === 'All categories' || motion.category === motionCategoryFilter
-          return matchesSearch && matchesCategory && (!favoritesOnly || motion.is_favorite)
-        })
-        return <div className="animate-fade-in-up space-y-6">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3"><div><h1 className="text-2xl font-semibold text-charcoal">Motions Library</h1><p className="text-sm text-gray-500 mt-1">Your personal collection of motions and procedure notes.</p></div><button onClick={() => openModal('motion')} className="bg-accent text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-900 transition-colors flex items-center justify-center gap-2"><Plus size={16} /> New Motion</button></div>
-          {motionsError && <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{motionsError}</div>}
-          <div className="flex flex-col md:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-3 top-3 text-gray-400" size={18} /><input type="search" value={motionSearch} onChange={e => setMotionSearch(e.target.value)} placeholder="Search motions..." aria-label="Search motions" className="w-full bg-white border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:border-accent transition-colors" /></div><select value={motionCategoryFilter} onChange={e => setMotionCategoryFilter(e.target.value)} aria-label="Filter by category" className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm"><option>All categories</option>{motionCategories.map(category => <option key={category}>{category}</option>)}</select><button onClick={() => setFavoritesOnly(value => !value)} aria-pressed={favoritesOnly} className={`px-4 py-2.5 rounded-xl border text-sm font-medium ${favoritesOnly ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{favoritesOnly ? '★ Favorites only' : '☆ Favorites'}</button></div>
-          {motionsLoading ? <div className="bg-white border border-gray-100 rounded-xl p-12 text-center text-gray-500"><Loader2 className="mx-auto animate-spin mb-3" size={24} />Loading your motions…</div> : visibleMotions.length === 0 ? <div className="bg-white border border-gray-100 rounded-xl p-12 text-center"><Library className="mx-auto text-gray-300 mb-3" size={44} /><h3 className="text-gray-700 font-medium">{motions.length === 0 ? 'No motions yet' : 'No matching motions'}</h3><p className="text-gray-400 text-sm mt-1">{motions.length === 0 ? 'Add your first motion of procedure to get started.' : 'Try another search or clear your filters.'}</p>{motions.length === 0 && <button onClick={() => openModal('motion')} className="mt-4 inline-flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-lg text-sm font-medium"><Plus size={16} /> Add your first motion</button>}</div> : <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{visibleMotions.map(motion => <article key={motion.id} className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="inline-flex rounded-full bg-blue-50 text-accent px-2.5 py-1 text-xs font-medium">{motion.category}</span><h2 className="font-semibold text-charcoal mt-3 break-words">{motion.title}</h2></div><button onClick={() => void toggleMotionFavorite(motion)} aria-label={motion.is_favorite ? 'Remove from favorites' : 'Add to favorites'} title={motion.is_favorite ? 'Remove favorite' : 'Add favorite'} className={`text-xl leading-none ${motion.is_favorite ? 'text-amber-500' : 'text-gray-300 hover:text-amber-400'}`}>{motion.is_favorite ? '★' : '☆'}</button></div><p className="text-sm text-gray-600 mt-2 whitespace-pre-wrap break-words">{motion.explanation}</p>{motion.motion_text && <div className="mt-3 rounded-lg bg-gray-50 p-3"><p className="text-xs uppercase tracking-wide text-gray-400 mb-1">Suggested wording</p><p className="text-sm text-gray-700 whitespace-pre-wrap">{motion.motion_text}</p></div>}<div className="flex flex-wrap gap-2 mt-3 text-xs text-gray-500">{motion.speaking_time_seconds != null && <span className="rounded-md bg-gray-50 px-2 py-1">{motion.speaking_time_seconds}s speaking time</span>}{motion.voting_threshold && <span className="rounded-md bg-gray-50 px-2 py-1">{motion.voting_threshold}</span>}{motion.precedence && <span className="rounded-md bg-gray-50 px-2 py-1">{motion.precedence}</span>}</div>{motion.personal_notes && <p className="text-sm text-gray-500 mt-3"><span className="font-medium text-gray-600">Your notes: </span>{motion.personal_notes}</p>}<div className="flex items-center justify-between border-t border-gray-100 mt-4 pt-3">{motion.source_url ? <a href={motion.source_url} target="_blank" rel="noreferrer" className="text-sm text-accent hover:underline">View source ↗</a> : <span className="text-xs text-gray-400">Personal motion</span>}<div className="flex gap-3"><button onClick={() => editMotion(motion)} className="text-sm font-medium text-gray-600 hover:text-accent">Edit</button><button onClick={() => void deleteMotion(motion)} className="text-sm font-medium text-red-600 hover:text-red-700">Delete</button></div></div></article>)}</div>}
-        </div>
-      }
-      case 'conferences':
-        return <div className="animate-fade-in-up space-y-6"><div className="flex justify-between items-center"><h1 className="text-2xl font-semibold text-charcoal">My Conferences</h1><button onClick={() => openModal('conference')} className="bg-accent text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-900 transition-colors flex items-center gap-2"><Plus size={16} /> New Conference</button></div><div className="bg-white border border-gray-100 rounded-xl p-12 text-center"><CalendarDays className="mx-auto text-gray-300 mb-3" size={48} /><h3 className="text-gray-600 font-medium">No conferences planned</h3><p className="text-gray-400 text-sm mt-1">Start organizing your next MUN experience.</p></div></div>
-      case 'passport':
-        return <div className="animate-fade-in-up space-y-6"><h1 className="text-2xl font-semibold text-charcoal">MUN Passport</h1><div className="bg-white border border-gray-100 rounded-xl p-12 text-center"><Globe2 className="mx-auto text-gray-300 mb-3" size={48} /><h3 className="text-gray-600 font-medium">Your timeline is empty</h3><p className="text-gray-400 text-sm mt-1">Record your past conferences to build your passport.</p></div></div>
-      case 'notes':
-        return <div className="animate-fade-in-up space-y-6"><div className="flex justify-between items-center"><h1 className="text-2xl font-semibold text-charcoal">My Notes</h1><button onClick={() => openModal('note')} className="bg-accent text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-900 transition-colors flex items-center gap-2"><Plus size={16} /> New Note</button></div><div className="bg-white border border-gray-100 rounded-xl p-12 text-center"><StickyNote className="mx-auto text-gray-300 mb-3" size={48} /><h3 className="text-gray-600 font-medium">No notes available</h3><p className="text-gray-400 text-sm mt-1">Write down your speeches, research, and ideas.</p></div></div>
-      case 'community':
-        return <div className="animate-fade-in-up space-y-6"><h1 className="text-2xl font-semibold text-charcoal">Community Resources</h1><p className="text-gray-500">Discover public guides and motions shared by other delegates.</p><div className="bg-white border border-gray-100 rounded-xl p-12 text-center"><BookOpen className="mx-auto text-gray-300 mb-3" size={48} /><h3 className="text-gray-600 font-medium">Library is loading...</h3><p className="text-gray-400 text-sm mt-1">Community features will be available after Phase 2.</p></div></div>
-      case 'settings':
-        return <div className="animate-fade-in-up space-y-6"><h1 className="text-2xl font-semibold text-charcoal">Settings</h1><div className="bg-white border border-gray-100 rounded-xl p-6"><h2 className="text-lg font-medium text-charcoal mb-4">Profile Information</h2><div className="space-y-4 max-w-md"><div><label className="block text-sm font-medium text-gray-700 mb-1">Email address</label><input disabled type="text" value={session?.user.email ?? ''} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-500" /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label><input disabled type="text" value={session?.user.user_metadata?.display_name ?? 'Delegate'} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-500" /></div><p className="text-xs text-gray-400">Your account is managed securely by Supabase.</p></div></div></div>
-      default:
-        return null
-    }
+    const info = pageInfo[currentPage]; const PageIcon = info.icon
+    if (currentPage === 'simulator') return <Simulator session={session!} />
+    if (currentPage === 'dashboard') return <div className="space-y-8 animate-fade-in-up"><section className="hero-panel rounded-3xl p-6 sm:p-8"><div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5"><div><h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, {displayNameValue.split(' ')[0]}.</h1><p className="muted mt-3 max-w-xl">Your conferences, research and documents — organized in one considered workspace.</p></div><button onClick={() => openWorkspace('paper')} className={buttonGold}><Plus size={17} /> New position paper</button></div><div className="hero-rule mt-7" /><div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5"><div className="metric"><span className="muted text-xs">Conferences</span><strong>{workspaceItems.filter(i => i.kind === 'conference').length}</strong></div><div className="metric"><span className="muted text-xs">Documents</span><strong>{allDocuments.length}</strong></div><div className="metric"><span className="muted text-xs">Saved motions</span><strong>{motions.length}</strong></div><div className="metric"><span className="muted text-xs">Research notes</span><strong>{workspaceItems.filter(i => i.kind === 'note' || i.kind === 'research').length}</strong></div></div></section>
+      <section><div className="section-heading mb-4"><div><h2 className="text-lg font-semibold">Quick actions</h2><p className="muted text-sm mt-1">Start your next piece of preparation.</p></div></div><div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">{([{ kind: 'paper' as WorkspaceKind, label: 'Position paper', desc: 'Build your country stance', icon: FileText }, { kind: 'research' as WorkspaceKind, label: 'Research note', desc: 'Collect sources and findings', icon: ResearchIcon }, { kind: 'resolution' as WorkspaceKind, label: 'Resolution', desc: 'Structure clauses', icon: ScrollText }, { kind: 'speech' as WorkspaceKind, label: 'Speech draft', desc: 'Prepare what to say', icon: Mic2 }]).map(action => <button key={action.kind} onClick={() => openWorkspace(action.kind)} className="panel quick-action rounded-2xl p-4 text-left"><span className="icon-tile mb-4 inline-flex"><action.icon size={20} /></span><span className="block font-semibold">{action.label}</span><span className="muted text-sm block mt-1">{action.desc}</span><ChevronRight className="quick-arrow" size={17} /></button>)}</div></section>
+      <section className="panel snake-launch-card rounded-2xl p-5"><div className="flex items-center gap-4"><div className="snake-launch-icon"><Gamepad2 size={23} /></div><div className="min-w-0 flex-1"><h2 className="font-semibold">Need a quick break?</h2><p className="muted text-sm mt-1">Play a round of classic Snake, styled for MUNly.</p></div><button onClick={() => setSnakeOpen(true)} className={buttonSecondary}><Gamepad2 size={16} /> Play Snake <ChevronRight size={15} /></button></div></section>
+      <div className="grid lg:grid-cols-2 gap-5"><section className="panel rounded-2xl p-5"><div className="flex items-center justify-between mb-4"><div><h2 className="font-semibold">Upcoming conferences</h2><p className="muted text-sm mt-1">Keep your dates in view.</p></div><button onClick={() => setCurrentPage('conferences')} className="gold-link text-sm">View all</button></div>{upcoming.length ? <div className="space-y-3">{upcoming.slice(0, 3).map(item => <div key={item.id} className="list-row"><div className="date-tile"><span>{item.metadata.date ? new Date(item.metadata.date).toLocaleDateString(undefined, { month: 'short' }) : '—'}</span><strong>{item.metadata.date ? new Date(item.metadata.date).getDate() : '—'}</strong></div><div className="min-w-0 flex-1"><p className="font-medium truncate">{item.title}</p><p className="muted text-xs mt-1">{item.metadata.location || item.metadata.committee || 'Conference'}</p></div></div>)}</div> : <div className="empty-inline"><CalendarDays size={20} /><span>No upcoming dates yet. Add a conference to get started.</span></div>}<button onClick={() => openWorkspace('conference')} className={`${buttonSecondary} mt-4 w-full`}><Plus size={15} /> Add conference</button></section><section className="panel rounded-2xl p-5"><div className="flex items-center justify-between mb-4"><div><h2 className="font-semibold">Recently updated</h2><p className="muted text-sm mt-1">Pick up where you left off.</p></div></div>{workspaceItems.filter(i => i.kind !== 'conference' && i.kind !== 'passport').slice(0, 4).length ? <div className="space-y-1">{workspaceItems.filter(i => i.kind !== 'conference' && i.kind !== 'passport').slice(0, 4).map(item => <button key={item.id} onClick={() => openWorkspace(item.kind, item)} className="recent-row"><span className="icon-tile small"><FileText size={16} /></span><span className="flex-1 min-w-0 text-left"><strong className="block truncate text-sm">{item.title}</strong><span className="muted text-xs">{kindLabels[item.kind]} · {formatDate(item.updated_at)}</span></span><ChevronRight size={15} className="muted" /></button>)}</div> : <div className="empty-inline"><FileText size={20} /><span>Your saved documents will appear here.</span></div>}</section></div></div>
+
+    if (currentPage === 'motions') return <div className="space-y-6 animate-fade-in-up"><div className="page-title-row"><div><h1 className="text-2xl font-semibold mt-1">Motions Library</h1><p className="muted mt-1">Browse 120 built-in examples or manage your own motions.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => { setImportOpen(v => !v); setImportMessage(''); setImportRows([]) }} className={buttonSecondary}><ClipboardPaste size={16} /> Bulk import</button><button onClick={() => openMotion()} className={buttonGold}><Plus size={16} /> Add motion</button></div></div>{motionsError && <div className="alert-error rounded-xl p-3 text-sm">{motionsError}</div>}<div className="flex flex-col sm:flex-row gap-3"><div className="search-field flex-1"><Search size={17} /><input type="search" value={motionSearch} onChange={e => setMotionSearch(e.target.value)} placeholder="Search motions…" aria-label="Search motions" /></div><select value={motionCategoryFilter} onChange={e => setMotionCategoryFilter(e.target.value)} aria-label="Filter by category" className={inputClass + ' sm:w-auto'}><option>All categories</option>{[...new Set([...motionPresets.map(p => p.category), ...motions.map(m => m.category)])].sort().map(category => <option key={category}>{category}</option>)}</select><button onClick={() => setFavoritesOnly(value => !value)} aria-pressed={favoritesOnly} className={`${buttonSecondary} ${favoritesOnly ? 'selected-filter' : ''}`}><Star size={15} />{favoritesOnly ? 'Favorites only' : 'Favorites'}</button></div>
+      {importOpen && <section className="panel rounded-2xl p-5 space-y-4"><div><h2 className="font-semibold">Import many motions</h2><p className="muted text-sm mt-1">Paste a list with one motion per line. MUNly uses local keyword rules to suggest categories; nothing is sent to an AI service.</p></div><textarea rows={5} value={bulkText} onChange={e => setBulkText(e.target.value)} className={inputClass} placeholder={'Motion to open debate\nMotion for a moderated caucus on climate funding\nMotion to move into voting procedure'} /><div className="flex justify-end"><button onClick={prepareImport} className={buttonSecondary}><Search size={15} /> Separate and categorise</button></div>{importRows.length > 0 && <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium">Review {importRows.length} motions</h3><div className="flex gap-2"><button onClick={() => setImportRows(rows => rows.map(r => ({ ...r, selected: !r.duplicate })))} className="text-sm muted">Select non-duplicates</button><button onClick={() => setImportRows(rows => rows.map(r => ({ ...r, selected: true })))} className="text-sm muted">Select all</button></div></div><div className="max-h-96 overflow-auto space-y-2">{importRows.map(row => <div key={row.id} className="sub-panel rounded-xl p-3"><div className="flex items-start gap-3"><input aria-label={`Import ${row.title}`} type="checkbox" checked={row.selected} onChange={e => setImportRows(rows => rows.map(r => r.id === row.id ? { ...r, selected: e.target.checked } : r))} className="mt-1" /><div className="min-w-0 flex-1 space-y-2"><input aria-label="Motion title" value={row.title} onChange={e => setImportRows(rows => rows.map(r => r.id === row.id ? { ...r, title: e.target.value, category: classifyMotion(e.target.value) } : r))} className={inputClass} /><select aria-label="Suggested category" value={row.category} onChange={e => setImportRows(rows => rows.map(r => r.id === row.id ? { ...r, category: e.target.value } : r))} className={inputClass}>{[...new Set([...motionCategories, ...motionPresets.map(p => p.category)])].map(c => <option key={c}>{c}</option>)}</select><div className="flex flex-wrap gap-2"><span className="meta-chip">Suggested: {row.category}</span>{row.duplicate && <span className="status-chip">Possible duplicate — not selected</span>}</div></div></div></div>)}</div><div className="flex flex-wrap items-center justify-between gap-3"><p className="muted text-xs">Selected: {importRows.filter(r => r.selected).length}. Review categories and wording before saving.</p><button disabled={importSaving} onClick={() => void saveImportedMotions()} className={buttonGold}><Save size={15} />{importSaving ? 'Saving…' : 'Save selected motions'}</button></div></div>}{importMessage && <p role="status" className="alert-success rounded-xl p-3 text-sm">{importMessage}</p>}</section>}
+      {presetMessage && <p role="status" className="alert-success rounded-xl p-3 text-sm">{presetMessage}</p>}
+      <section className="panel rounded-2xl p-5 space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Built-in motion presets</h2><p className="muted text-sm mt-1">{visiblePresets.length} preset examples match your filters. Procedures can vary between conferences.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => setShowPresets(v => !v)} className={buttonSecondary}>{showPresets ? 'Hide presets' : 'Show presets'}</button><button disabled={presetSavingId === '__all__'} onClick={() => void addAllPresets()} className={buttonGold}><Plus size={15} />{presetSavingId === '__all__' ? 'Adding…' : 'Add all available presets'}</button></div></div>{showPresets && <div className="grid lg:grid-cols-2 gap-3">{visiblePresets.map((preset) => { const alreadyAdded = existingMotionKeys.has(normaliseMotionKey(preset.title)); return <article key={`${preset.category}-${preset.title}`} className="sub-panel rounded-xl p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="status-chip">{preset.category}</span><h3 className="font-semibold mt-2">{preset.title}</h3></div><button disabled={alreadyAdded || presetSavingId === preset.title} onClick={() => void savePreset(preset)} className="icon-button" aria-label={alreadyAdded ? 'Already in your library' : `Add ${preset.title} to your library`} title={alreadyAdded ? 'Already in your library' : 'Add to my library'}>{alreadyAdded ? <CheckCircle2 size={16} /> : presetSavingId === preset.title ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}</button></div><p className="muted text-sm mt-2">{preset.explanation}</p><div className="sub-panel rounded-lg p-3 mt-3"><p className="text-sm">{preset.motion_text}</p></div></article>})}</div>}</section>
+      <section className="space-y-3"><div><h2 className="font-semibold">My saved motions</h2><p className="muted text-sm mt-1">Your personal motions and the presets you've saved.</p></div>{motionsLoading ? <div className="panel rounded-2xl p-12 text-center muted"><Loader2 className="mx-auto animate-spin mb-3" size={24} />Loading motions…</div> : visibleMotions.length === 0 ? <div className="empty-state"><Library size={35} /><h3>{motions.length === 0 ? 'No saved motions yet' : 'No matching motions'}</h3><p>{motions.length === 0 ? 'Add a preset above, import a list, or create a motion of your own.' : 'Try another search or clear your filters.'}</p>{motions.length === 0 && <button onClick={() => openMotion()} className={`${buttonGold} mt-4`}><Plus size={15} /> Add your first motion</button>}</div> : <div className="grid lg:grid-cols-2 gap-4">{visibleMotions.map(motion => <article key={motion.id} className="panel rounded-2xl p-5"><div className="flex items-start justify-between gap-3"><div><span className="status-chip">{motion.category}</span><h2 className="font-semibold mt-3">{motion.title}</h2></div><button onClick={() => void toggleMotionFavorite(motion)} aria-label={motion.is_favorite ? 'Remove favorite' : 'Add favorite'} className={`favorite-button ${motion.is_favorite ? 'is-favorite' : ''}`}><Star size={17} fill={motion.is_favorite ? 'currentColor' : 'none'} /></button></div><p className="muted text-sm mt-2 whitespace-pre-wrap">{motion.explanation}</p>{motion.motion_text && <div className="sub-panel rounded-xl p-3 mt-3"><p className="text-sm whitespace-pre-wrap">{motion.motion_text}</p></div>}<div className="flex flex-wrap gap-2 mt-3">{motion.speaking_time_seconds != null && <span className="meta-chip"><Clock3 size={12} /> {motion.speaking_time_seconds}s</span>}{motion.voting_threshold && <span className="meta-chip">{motion.voting_threshold}</span>}{motion.precedence && <span className="meta-chip">{motion.precedence}</span>}</div>{motion.personal_notes && <p className="muted text-sm mt-3"><strong>Notes:</strong> {motion.personal_notes}</p>}<div className="flex items-center justify-between gap-3 border-t border-[var(--border)] mt-4 pt-3">{motion.source_url ? <a href={motion.source_url} target="_blank" rel="noreferrer" className="gold-link text-sm">View source ↗</a> : <span className="muted text-xs">Personal motion</span>}<div className="flex gap-3"><button onClick={() => openMotion(motion)} className="gold-link text-sm">Edit</button><button onClick={() => void deleteMotion(motion)} className="danger-link text-sm">Delete</button></div></div></article>)}</div>}</section></div>
+
+    if (currentPage === 'settings') return <div className="space-y-6 animate-fade-in-up"><div><h1 className="text-2xl font-semibold mt-1">Settings</h1><p className="muted mt-1">Manage your profile and communication preferences.</p></div><div className="panel rounded-2xl p-6"><h2 className="font-semibold mb-4">Profile information</h2><div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Email address</label><input disabled value={session?.user.email ?? ''} className={inputClass} /></div><div><label className={labelClass}>Display name</label><input disabled value={displayNameValue} className={inputClass} /></div></div><p className="muted text-xs mt-3">Your account is managed securely by Supabase.</p></div><div className="panel rounded-2xl p-6"><div className="flex items-start gap-3"><div className="icon-tile"><Bell size={18} /></div><div className="flex-1"><h2 className="font-semibold">Email notifications</h2><p className="muted text-sm mt-1">Choose whether you would like to receive occasional product announcements.</p></div></div><form onSubmit={saveSettings} className="mt-5"><label className="setting-toggle"><span><strong className="block text-sm">Product updates</strong><span className="muted text-xs">Major releases and meaningful improvements only.</span></span><input type="checkbox" checked={emailUpdates} onChange={e => setEmailUpdates(e.target.checked)} /></label><p className="muted text-xs mt-3">This preference is saved to your Supabase user profile. Sending announcements requires a separately configured email provider.</p>{settingsMessage && <p role="status" className="alert-success rounded-xl p-3 mt-4 text-sm">{settingsMessage}</p>}<button type="submit" className={`${buttonGold} mt-4`}><Save size={15} /> Save preferences</button></form></div><div className="panel rounded-2xl p-6"><h2 className="font-semibold">Account security</h2><p className="muted text-sm mt-1">Password recovery is available from the sign-in screen. Your private documents are separated by account through Supabase Row Level Security.</p><button onClick={() => { setAuthMode('forgot'); setCurrentPage('settings'); setAuthMessage(''); setAuthError(''); void supabase?.auth.signOut() }} className={`${buttonSecondary} mt-4`}>Sign out to reset password</button></div></div>
+
+    if (currentPage === 'community') return <div className="space-y-6 animate-fade-in-up"><div><h1 className="text-2xl font-semibold mt-1">Community Resources</h1><p className="muted mt-1">A future home for public guides and resources shared by delegates.</p></div><div className="panel rounded-2xl p-8 sm:p-10"><div className="icon-tile mb-4"><BookOpen size={22} /></div><h2 className="text-lg font-semibold">Your private workspace comes first</h2><p className="muted text-sm mt-2 max-w-2xl">This version keeps your documents private. Public sharing, discovery and moderation need their own permissions and safety design, so community publishing is not enabled yet.</p><div className="grid sm:grid-cols-3 gap-3 mt-6"><div className="sub-panel rounded-xl p-4"><FileText size={18} className="gold-text mb-2" /><strong className="block text-sm">Position papers</strong><span className="muted text-xs">Build a reusable personal library.</span></div><div className="sub-panel rounded-xl p-4"><Library size={18} className="gold-text mb-2" /><strong className="block text-sm">Motions</strong><span className="muted text-xs">Keep procedural wording organized.</span></div><div className="sub-panel rounded-xl p-4"><ResearchIcon size={18} className="gold-text mb-2" /><strong className="block text-sm">Research</strong><span className="muted text-xs">Keep evidence linked to your work.</span></div></div></div></div>
+
+    if (info.kind) return <div className="space-y-6 animate-fade-in-up"><div className="page-title-row"><div><h1 className="text-2xl font-semibold mt-1">{info.title}</h1><p className="muted mt-1">{info.subtitle}</p></div><button onClick={() => openWorkspace(info.kind!)} className={buttonGold}><Plus size={16} /> New {info.kind === 'paper' ? 'position paper' : info.kind === 'research' ? 'research note' : info.kind === 'resolution' ? 'resolution' : info.kind === 'speech' ? 'speech' : info.kind === 'passport' ? 'entry' : info.kind}</button></div>{workspaceError && <div className="alert-error rounded-xl p-3 text-sm">{workspaceError}</div>}{(info.kind === 'paper' || info.kind === 'resolution' || info.kind === 'speech' || info.kind === 'research' || info.kind === 'note') && <div className="search-field"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${info.title.toLowerCase()}…`} /></div>}{workspaceLoading ? <div className="panel rounded-2xl p-10 text-center muted"><Loader2 size={22} className="animate-spin mx-auto mb-3" />Loading your workspace…</div> : currentItems.length ? <div className="grid lg:grid-cols-2 gap-4">{currentItems.map(itemCard)}</div> : <div className="empty-state"><PageIcon size={35} /><h3>No {info.kind === 'paper' ? 'position papers' : info.kind === 'research' ? 'research documents' : info.kind === 'resolution' ? 'draft resolutions' : info.kind === 'speech' ? 'speech drafts' : info.kind === 'conference' ? 'conferences' : info.kind === 'passport' ? 'passport entries' : 'notes'} yet</h3><p>Create your first item. It will be saved privately to your account.</p><button onClick={() => openWorkspace(info.kind!)} className={`${buttonGold} mt-4`}><Plus size={15} /> Create first item</button></div>}</div>
+    return null
   }
 
-  if (authLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#f9fafb] text-gray-500"><Loader2 className="animate-spin mr-2" size={20} /> Loading your workspace…</div>
-  }
+  if (authLoading) return <div className="auth-shell min-h-screen flex items-center justify-center muted"><Loader2 className="animate-spin mr-2" size={20} /> Loading your workspace…</div>
+  if (!session || authMode === 'forgot' || authMode === 'update-password') return renderAuth()
 
-  if (!session || authMode === 'forgot' || authMode === 'update-password') {
-    return renderAuth()
-  }
-
-  return (
-    <div className="min-h-screen flex bg-[#f9fafb]">
-      <aside className="w-64 bg-white border-r border-gray-100 hidden md:flex flex-col">
-        <div className="p-6"><div className="text-xl font-bold tracking-tight text-charcoal flex items-center gap-2"><Globe2 className="text-accent" />MUN Helper</div></div>
-        <nav className="flex-1 px-4 space-y-1">
-          {navItems.map((item) => (
-            <button key={item.id} onClick={() => setCurrentPage(item.id as Page)} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all smooth text-sm font-medium ${currentPage === item.id ? 'bg-blue-50 text-accent' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}>
-              <item.icon size={18} className={currentPage === item.id ? 'text-accent' : 'text-gray-400'} />{item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="p-4 border-t border-gray-100">
-          <div className="text-xs text-gray-500 truncate px-2 mb-2">{session.user.email}</div>
-          <button onClick={handleSignOut} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg"><LogOut size={17} /> Sign out</button>
-        </div>
-      </aside>
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 md:hidden">
-          <div className="text-lg font-bold text-charcoal flex items-center gap-2"><Globe2 className="text-accent" size={24} />MUN Helper</div>
-          <button onClick={handleSignOut} aria-label="Sign out" className="p-2 text-gray-500"><LogOut size={19} /></button>
-        </header>
-        <div className="flex-1 overflow-y-auto p-6 md:p-10"><div className="max-w-5xl mx-auto">{renderPageContent()}</div></div>
-      </main>
-      {renderModal()}
-    </div>
-  )
+  const modalTitle = modalKind === 'motion' ? (editingMotionId ? 'Edit motion' : 'Add motion') : modalKind ? `${editingItemId ? 'Edit' : 'New'} ${kindLabels[modalKind].toLowerCase()}` : ''
+  return <div className="app-shell min-h-screen flex"><aside className={`sidebar ${mobileNavOpen ? 'mobile-open' : ''}`}><div className="sidebar-brand"><div className="brand-mark"><span className="brand-icon"><Globe2 size={22} /></span><span>MUNly</span></div><button className="mobile-close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={19} /></button></div><nav className="sidebar-nav">{navGroups.map(group => <div key={group.label} className="nav-group"><p className="nav-group-label">{group.label}</p>{group.items.map(item => <button key={item.id} onClick={() => { setCurrentPage(item.id); setSearch(''); setMobileNavOpen(false) }} className={`nav-link ${currentPage === item.id ? 'active' : ''}`}><item.icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{currentPage === item.id && <span className="active-indicator" />}</button>)}</div>)}</nav><div className="sidebar-bottom"><div className="user-avatar">{displayNameValue.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><strong className="block text-sm truncate">{displayNameValue}</strong><span className="muted text-xs block truncate">{session.user.email}</span></div><button onClick={() => void handleSignOut()} title="Sign out" className="icon-button"><LogOut size={17} /></button></div></aside>{mobileNavOpen && <button aria-label="Close navigation overlay" className="nav-overlay" onClick={() => setMobileNavOpen(false)} />}
+    <main className="main-shell flex-1 min-w-0"><header className="topbar"><button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={20} /></button><div className="breadcrumb"><span className="muted">MUNly</span><ChevronRight size={14} /><strong>{pageInfo[currentPage].title}</strong></div><div className="topbar-right"><span className="sync-status"><span /> Personal workspace</span><button onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')} className="theme-toggle" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}</button><button onClick={() => setCurrentPage('settings')} className="topbar-avatar" title="Settings">{displayNameValue.slice(0, 1).toUpperCase()}</button></div></header><div className="page-content"><div key={currentPage} className="content-wrap page-transition">{renderPageContent()}<footer className="app-footer"><span>© MUNly</span><span>Prepared for better diplomacy.</span></footer></div></div></main>
+    {snakeOpen && <SnakeGame onClose={() => setSnakeOpen(false)} />}
+    {isModalOpen && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setIsModalOpen(false) }}><div role="dialog" aria-modal="true" aria-labelledby="modal-title" className="modal-panel"><div className="modal-header"><div><h2 id="modal-title" className="text-lg font-semibold mt-1">{modalTitle}</h2></div><button onClick={() => setIsModalOpen(false)} className="icon-button" aria-label="Close dialog"><X size={19} /></button></div><div className="modal-body">{modalKind === 'motion' ? renderMotionModal() : renderWorkspaceModal()}</div></div></div>}
+  </div>
 }
