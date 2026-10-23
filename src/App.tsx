@@ -2,13 +2,14 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
   LayoutDashboard, Library, CalendarDays, Globe2, StickyNote, BookOpen, Settings, MessageSquare,
-  Plus, Search, X, LogOut, LockKeyhole, Mail, ArrowLeft, Loader2, CheckCircle2,
+  Plus, Search, X, LogOut, ArrowLeft, Loader2, CheckCircle2,
   FileText, StickyNote as ResearchIcon, ScrollText, Mic2, Download, ExternalLink, Star, Trash2,
   Pencil, Clock3, ChevronRight, Menu, Save, Bell, ClipboardPaste, Sun, Moon, Gamepad2,
 } from 'lucide-react'
 import { supabase, supabaseConfigured } from './lib/supabase'
 import Simulator from './Simulator'
 import SnakeGame from './SnakeGame'
+import RichWorkspaceEditor from './RichWorkspaceEditor'
 import { motionPresets, type MotionPreset } from './motionPresets'
 
 type Page = 'dashboard' | 'motions' | 'conferences' | 'passport' | 'notes' | 'community' | 'settings' | 'papers' | 'research' | 'resolutions' | 'speeches' | 'simulator'
@@ -20,10 +21,10 @@ type MotionRecord = {
 }
 type WorkspaceKind = 'conference' | 'passport' | 'note' | 'paper' | 'research' | 'resolution' | 'speech'
 type WorkspaceItem = { id: string; user_id: string; kind: WorkspaceKind; title: string; content: string; metadata: Record<string, string>; created_at: string; updated_at: string }
-type WorkspaceForm = { title: string; content: string; conference: string; committee: string; country: string; agenda: string; date: string; location: string; tags: string; source_url: string; status: string }
+type WorkspaceForm = { title: string; content: string; conference: string; committee: string; country: string; agenda: string; date: string; location: string; tags: string; source_url: string; status: string; sideNotes: string }
 type MotionForm = { title: string; explanation: string; category: string; motion_text: string; speaking_time_seconds: string; voting_threshold: string; precedence: string; source_url: string; personal_notes: string }
 const emptyMotionForm: MotionForm = { title: '', explanation: '', category: 'General Procedure', motion_text: '', speaking_time_seconds: '', voting_threshold: '', precedence: '', source_url: '', personal_notes: '' }
-const emptyWorkspaceForm: WorkspaceForm = { title: '', content: '', conference: '', committee: '', country: '', agenda: '', date: '', location: '', tags: '', source_url: '', status: 'Draft' }
+const emptyWorkspaceForm: WorkspaceForm = { title: '', content: '', conference: '', committee: '', country: '', agenda: '', date: '', location: '', tags: '', source_url: '', status: 'Draft', sideNotes: '' }
 const motionCategories = ['General Procedure', 'Speeches and Debate', 'Moderated Caucus', 'Unmoderated Caucus', 'Points and Questions', 'Draft Resolutions and Amendments', 'Voting Procedure', 'Suspension and Adjournment', 'Other', 'Debate', 'Caucus', 'Voting', 'Resolution', 'Points']
 const kindLabels: Record<WorkspaceKind, string> = { conference: 'Conference', passport: 'MUN Passport entry', note: 'Research note', paper: 'Position paper', research: 'Research document', resolution: 'Draft resolution', speech: 'Speech draft' }
 const pageInfo: Record<Page, { title: string; subtitle: string; kind?: WorkspaceKind; icon: typeof FileText }> = {
@@ -43,17 +44,25 @@ const pageInfo: Record<Page, { title: string; subtitle: string; kind?: Workspace
 
 function formatDate(value: string) { return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) }
 function safeFilename(value: string) { return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'munly-document' }
+function documentText(content: string) {
+  if (!/<[a-z][\s\S]*>/i.test(content)) return content
+  const doc = new DOMParser().parseFromString(content, 'text/html')
+  doc.querySelectorAll('script,style').forEach(node => node.remove())
+  return (doc.body.textContent || '').replace(/\u00a0/g, ' ').trim()
+}
 function downloadDocument(title: string, content: string, format: 'doc' | 'txt') {
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.6;max-width:800px;margin:48px auto;color:#222}h1{font-size:24px}pre{white-space:pre-wrap;font-family:Arial,sans-serif}</style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(content)}</pre></body></html>`
-  const blob = new Blob([html], { type: format === 'doc' ? 'application/msword;charset=utf-8' : 'text/plain;charset=utf-8' })
+  const htmlContent = /<(p|h[1-6]|ul|ol|li|strong|em|u|blockquote|br)\b/i.test(content) ? content : `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.65;max-width:800px;margin:48px auto;color:#222}h1{font-size:24px}blockquote{border-left:3px solid #bbb;padding-left:16px;color:#555}li{margin:.3em 0}</style></head><body><h1>${escapeHtml(title)}</h1>${htmlContent}</body></html>`
+  const blob = new Blob([format === 'doc' ? html : documentText(content)], { type: format === 'doc' ? 'application/msword;charset=utf-8' : 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${safeFilename(title)}.${format}`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url)
 }
-function escapeHtml(value: string) { return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char)) }
+function escapeHtml(value: string) { return value.replace(/[&<>"']/g, char => { const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }; return entities[char] ?? char }) }
 function exportPdf(title: string, content: string) {
   const popup = window.open('', '_blank')
   if (!popup) { alert('Please allow pop-ups to export this document as PDF.'); return }
   popup.opener = null
-  popup.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.6;max-width:780px;margin:42px auto;color:#222;padding:0 20px}h1{font-size:24px}pre{white-space:pre-wrap;font:14px/1.65 Arial,sans-serif}@media print{body{margin:0 auto}}</style></head><body><h1>${escapeHtml(title)}</h1><pre>${escapeHtml(content)}</pre><script>window.onload=()=>window.print()<\/script></body></html>`)
+  const htmlContent = /<(p|h[1-6]|ul|ol|li|strong|em|u|blockquote|br)\b/i.test(content) ? content : `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`
+  popup.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;line-height:1.65;max-width:780px;margin:42px auto;color:#222;padding:0 20px}h1{font-size:24px}blockquote{border-left:3px solid #bbb;padding-left:16px}@media print{body{margin:0 auto}}</style></head><body><h1>${escapeHtml(title)}</h1>${htmlContent}<script>window.onload=()=>window.print()<\/script></body></html>`)
   popup.document.close()
 }
 
@@ -74,6 +83,23 @@ export default function App() {
   const [modalKind, setModalKind] = useState<WorkspaceKind | 'motion' | null>(null); const [isModalOpen, setIsModalOpen] = useState(false); const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [workspaceForm, setWorkspaceForm] = useState<WorkspaceForm>(emptyWorkspaceForm); const [workspaceSaving, setWorkspaceSaving] = useState(false)
   const [search, setSearch] = useState(''); const [mobileNavOpen, setMobileNavOpen] = useState(false); const [emailUpdates, setEmailUpdates] = useState(false); const [settingsMessage, setSettingsMessage] = useState('')
+
+  useEffect(() => {
+    if (!isModalOpen || !modalKind || modalKind === 'motion' || !session?.user.id) return
+    const kind = modalKind
+    if (!editingItemId) {
+      try { localStorage.setItem(`munly-draft-${session.user.id}-${kind}`, JSON.stringify(workspaceForm)) } catch {}
+      return
+    }
+    if (!['paper', 'research', 'resolution', 'speech', 'note'].includes(kind)) return
+    const timer = window.setTimeout(async () => {
+      if (!supabase) return
+      const metadata = { conference: workspaceForm.conference.trim(), committee: workspaceForm.committee.trim(), country: workspaceForm.country.trim(), agenda: workspaceForm.agenda.trim(), date: workspaceForm.date, location: workspaceForm.location.trim(), tags: workspaceForm.tags.trim(), source_url: workspaceForm.source_url.trim(), status: workspaceForm.status, sideNotes: workspaceForm.sideNotes }
+      const { error } = await supabase.from('workspace_items').update({ title: workspaceForm.title.trim() || 'Untitled document', content: workspaceForm.content, metadata }).eq('id', editingItemId).eq('user_id', session.user.id)
+      if (!error) setWorkspaceItems(items => items.map(item => item.id === editingItemId ? { ...item, title: workspaceForm.title.trim() || 'Untitled document', content: workspaceForm.content, metadata, updated_at: new Date().toISOString() } : item))
+    }, 1400)
+    return () => window.clearTimeout(timer)
+  }, [workspaceForm, isModalOpen, modalKind, editingItemId, session?.user.id])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -213,17 +239,18 @@ export default function App() {
   const openWorkspace = (kind: WorkspaceKind, item?: WorkspaceItem) => {
     setModalKind(kind); setEditingItemId(item?.id ?? null)
     const meta = item?.metadata ?? {}
-    setWorkspaceForm(item ? { title: item.title, content: item.content ?? '', conference: meta.conference ?? '', committee: meta.committee ?? '', country: meta.country ?? '', agenda: meta.agenda ?? '', date: meta.date ?? '', location: meta.location ?? '', tags: meta.tags ?? '', source_url: meta.source_url ?? '', status: meta.status ?? 'Draft' } : { ...emptyWorkspaceForm, title: kind === 'paper' ? 'Position Paper' : kind === 'resolution' ? 'Draft Resolution' : kind === 'speech' ? 'Opening Speech' : '' })
+    setWorkspaceForm(item ? { title: item.title, content: item.content ?? '', conference: meta.conference ?? '', committee: meta.committee ?? '', country: meta.country ?? '', agenda: meta.agenda ?? '', date: meta.date ?? '', location: meta.location ?? '', tags: meta.tags ?? '', source_url: meta.source_url ?? '', status: meta.status ?? 'Draft', sideNotes: meta.sideNotes ?? '' } : (() => { let draft: Partial<WorkspaceForm> = {}; try { draft = JSON.parse(localStorage.getItem(`munly-draft-${session?.user.id}-${kind}`) || '{}') } catch {} return { ...emptyWorkspaceForm, ...draft, title: draft.title || (kind === 'paper' ? 'Position Paper' : kind === 'resolution' ? 'Draft Resolution' : kind === 'speech' ? 'Opening Speech' : '') } })())
     setWorkspaceError(''); setIsModalOpen(true)
   }
   const saveWorkspaceItem = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); if (!supabase || !session?.user.id || !modalKind || modalKind === 'motion') { setWorkspaceError('Please sign in before saving.'); return }
     setWorkspaceSaving(true); setWorkspaceError('')
-    const metadata = { conference: workspaceForm.conference.trim(), committee: workspaceForm.committee.trim(), country: workspaceForm.country.trim(), agenda: workspaceForm.agenda.trim(), date: workspaceForm.date, location: workspaceForm.location.trim(), tags: workspaceForm.tags.trim(), source_url: workspaceForm.source_url.trim(), status: workspaceForm.status }
+    const metadata = { conference: workspaceForm.conference.trim(), committee: workspaceForm.committee.trim(), country: workspaceForm.country.trim(), agenda: workspaceForm.agenda.trim(), date: workspaceForm.date, location: workspaceForm.location.trim(), tags: workspaceForm.tags.trim(), source_url: workspaceForm.source_url.trim(), status: workspaceForm.status, sideNotes: workspaceForm.sideNotes }
     const payload = { user_id: session.user.id, kind: modalKind, title: workspaceForm.title.trim(), content: workspaceForm.content, metadata }
     try {
       if (editingItemId) { const { data, error } = await supabase.from('workspace_items').update({ title: payload.title, content: payload.content, metadata: payload.metadata }).eq('id', editingItemId).select('*').single(); if (error) throw error; setWorkspaceItems(items => items.map(item => item.id === editingItemId ? data as WorkspaceItem : item)) }
       else { const { data, error } = await supabase.from('workspace_items').insert(payload).select('*').single(); if (error) throw error; setWorkspaceItems(items => [data as WorkspaceItem, ...items]) }
+      try { localStorage.removeItem(`munly-draft-${session.user.id}-${modalKind}`) } catch {}
       setIsModalOpen(false); setEditingItemId(null); setWorkspaceForm(emptyWorkspaceForm)
     } catch (error) { setWorkspaceError(error instanceof Error ? error.message : 'Could not save this item. Check that the workspace migration has been applied.') } finally { setWorkspaceSaving(false) }
   }
@@ -292,11 +319,11 @@ export default function App() {
       {isConference && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Date</label><input type="date" value={workspaceForm.date} onChange={e => setWorkspaceForm(v => ({ ...v, date: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Location</label><input value={workspaceForm.location} onChange={e => setWorkspaceForm(v => ({ ...v, location: e.target.value }))} className={inputClass} placeholder="City / venue" /></div><div><label className={labelClass}>Committee</label><input value={workspaceForm.committee} onChange={e => setWorkspaceForm(v => ({ ...v, committee: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Status</label><select value={workspaceForm.status} onChange={e => setWorkspaceForm(v => ({ ...v, status: e.target.value }))} className={inputClass}><option>Planning</option><option>Registered</option><option>Attending</option><option>Completed</option></select></div></div>}
       {isPassport && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Date</label><input type="date" value={workspaceForm.date} onChange={e => setWorkspaceForm(v => ({ ...v, date: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Role / country</label><input value={workspaceForm.country} onChange={e => setWorkspaceForm(v => ({ ...v, country: e.target.value }))} className={inputClass} placeholder="Delegate, chair, country…" /></div><div><label className={labelClass}>Committee</label><input value={workspaceForm.committee} onChange={e => setWorkspaceForm(v => ({ ...v, committee: e.target.value }))} className={inputClass} /></div><div><label className={labelClass}>Conference / location</label><input value={workspaceForm.location} onChange={e => setWorkspaceForm(v => ({ ...v, location: e.target.value }))} className={inputClass} /></div></div>}
       {isResearch && <div className="grid sm:grid-cols-2 gap-4"><div><label className={labelClass}>Tags</label><input value={workspaceForm.tags} onChange={e => setWorkspaceForm(v => ({ ...v, tags: e.target.value }))} className={inputClass} placeholder="climate, sanctions, security" /></div><div><label className={labelClass}>Source URL</label><input type="url" value={workspaceForm.source_url} onChange={e => setWorkspaceForm(v => ({ ...v, source_url: e.target.value }))} className={inputClass} placeholder="https://…" /></div></div>}
-      <div><div className="flex items-center justify-between mb-1.5"><label className={labelClass}>{contentLabel}</label><span className="muted text-xs">Plain text supported</span></div><textarea rows={isPaper || isResolution || isSpeech ? 13 : 8} value={workspaceForm.content} onChange={e => setWorkspaceForm(v => ({ ...v, content: e.target.value }))} className={`${inputClass} editor-area`} placeholder={placeholder} /></div>
+      {(isPaper || isResolution || isSpeech || isResearch || isNote) ? <div><label className={`${labelClass} block mb-2`}>{contentLabel}</label><RichWorkspaceEditor kind={kind} title={workspaceForm.title} value={workspaceForm.content} sideNotes={workspaceForm.sideNotes} onChange={content => setWorkspaceForm(v => ({ ...v, content }))} onSideNotesChange={sideNotes => setWorkspaceForm(v => ({ ...v, sideNotes }))} /></div> : <div><div className="flex items-center justify-between mb-1.5"><label className={labelClass}>{contentLabel}</label><span className="muted text-xs">Plain text supported</span></div><textarea rows={8} value={workspaceForm.content} onChange={e => setWorkspaceForm(v => ({ ...v, content: e.target.value }))} className={`${inputClass} editor-area`} placeholder={placeholder} /></div>}
       {workspaceError && <div role="alert" className="alert-error rounded-xl p-3 text-sm">{workspaceError}</div>}<div className="flex justify-between items-center gap-3 pt-2"><span className="muted text-xs">Private to your account</span><div className="flex gap-2"><button type="button" onClick={() => setIsModalOpen(false)} className={buttonSecondary}>Cancel</button><button type="submit" disabled={workspaceSaving} className={buttonGold}>{workspaceSaving && <Loader2 size={16} className="animate-spin" />}{workspaceSaving ? 'Saving…' : editingItemId ? 'Save changes' : 'Save to MUNly'}</button></div></div></form>
   }
 
-  const itemCard = (item: WorkspaceItem) => <article key={item.id} className="panel item-card rounded-2xl p-5"><div className="flex items-start gap-3"><div className="icon-tile shrink-0"><FileText size={19} /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold break-words">{item.title}</h3><p className="muted text-xs mt-1">Updated {formatDate(item.updated_at)}{item.metadata?.committee ? ` · ${item.metadata.committee}` : ''}</p></div><span className="status-chip">{item.metadata?.status || kindLabels[item.kind]}</span></div>{item.content && <p className="muted text-sm mt-3 whitespace-pre-wrap line-clamp-3">{item.content.slice(0, 240)}{item.content.length > 240 ? '…' : ''}</p>}{item.metadata?.source_url && <a href={item.metadata.source_url} target="_blank" rel="noreferrer" className="gold-link text-xs inline-flex items-center gap-1 mt-3">Source <ExternalLink size={12} /></a>}<div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-[var(--border)]"><button onClick={() => openWorkspace(item.kind, item)} className={buttonSecondary}><Pencil size={14} /> Edit</button>{['paper', 'resolution', 'speech', 'research', 'note'].includes(item.kind) && <><button onClick={() => exportPdf(item.title, item.content)} className={buttonSecondary}><Download size={14} /> PDF</button><button onClick={() => downloadDocument(item.title, item.content, 'doc')} className={buttonSecondary}><Download size={14} /> Word</button></>}<button onClick={() => void deleteWorkspaceItem(item)} className="btn-danger ml-auto"><Trash2 size={14} /> Delete</button></div></div></div></article>
+  const itemCard = (item: WorkspaceItem) => <article key={item.id} className="panel item-card rounded-2xl p-5"><div className="flex items-start gap-3"><div className="icon-tile shrink-0"><FileText size={19} /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="font-semibold break-words">{item.title}</h3><p className="muted text-xs mt-1">Updated {formatDate(item.updated_at)}{item.metadata?.committee ? ` · ${item.metadata.committee}` : ''}</p></div><span className="status-chip">{item.metadata?.status || kindLabels[item.kind]}</span></div>{item.content && <p className="muted text-sm mt-3 whitespace-pre-wrap line-clamp-3">{documentText(item.content).slice(0, 240)}{documentText(item.content).length > 240 ? '…' : ''}</p>}{item.metadata?.source_url && <a href={item.metadata.source_url} target="_blank" rel="noreferrer" className="gold-link text-xs inline-flex items-center gap-1 mt-3">Source <ExternalLink size={12} /></a>}<div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-[var(--border)]"><button onClick={() => openWorkspace(item.kind, item)} className={buttonSecondary}><Pencil size={14} /> Edit</button>{['paper', 'resolution', 'speech', 'research', 'note'].includes(item.kind) && <><button onClick={() => exportPdf(item.title, item.content)} className={buttonSecondary}><Download size={14} /> PDF</button><button onClick={() => downloadDocument(item.title, item.content, 'doc')} className={buttonSecondary}><Download size={14} /> Word</button></>}<button onClick={() => void deleteWorkspaceItem(item)} className="btn-danger ml-auto"><Trash2 size={14} /> Delete</button></div></div></div></article>
 
   const renderPageContent = () => {
     const info = pageInfo[currentPage]; const PageIcon = info.icon
