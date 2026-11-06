@@ -1,69 +1,154 @@
-# MUNly
+# FinalMUN
+### Your MUN journey, all in one place.
 
-MUNly is a private workspace for Model United Nations preparation, built with React, Vite, TypeScript and Supabase. It uses a minimal soft-graphite interface with charcoal surfaces and cool grey accents.
+Welcome to **FinalMUN** — your personal space for everything Model United Nations.
 
-## Features
+Whether you're preparing for your first conference, writing a position paper, researching your country's policy or managing an entire conference, FinalMUN gives you the tools to stay organized, prepared and one step ahead.
 
-- Supabase authentication: sign up, sign in, password reset and password update.
-- Motions Library: 120 built-in procedure examples across eight categories, personal motions, suggested wording, favorites, editing and deletion. Conference rules can vary, so check your rulebook before using a preset.
-- Bulk motion import: paste multiple motions, classify them with local keyword rules, review suggested categories and duplicates, then save selected entries. No AI service is used.
-- Conferences: save conference dates, locations, committees and status.
-- MUN Passport: keep a record of past conferences, roles and reflections.
-- Personal notes and research workspace: save notes, source links, tags and research content.
-- Position paper editor: structured starting template and editable draft.
-- Resolution builder: organize preambulatory and operative clauses in a saved draft.
-- Speech writer: editable templates for opening speeches, GSL, caucuses, closing speeches and responses.
-- PDF export via the browser print dialog and Word-compatible `.doc` export for saved text documents.
-- Notification preference for product updates. Actual announcement delivery requires a separately configured email provider and is not active by default.
-- Responsive layouts for desktop, tablet and mobile. Full PWA installation is intentionally deferred.
+No messy documents. No scattered notes. Just everything you need, in one place.
 
-## Requirements
+---
 
-- Node.js 18 or newer (Node.js 20+ recommended)
-- A Supabase project
+## What can you do with FinalMUN?
 
-## Setup
+### Your Home
+Your personal starting point. Keep track of your MUN journey, stay organized and access the things that matter most.
 
-1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env`.
-3. Fill in the Supabase project URL and publishable/anon key:
+### Conferences
+Keep all your conferences organized. Save dates, locations, committees and statuses so you always know what's coming up.
 
-   ```env
-   VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-   VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
-   ```
+### Motions Library
+Not sure what motion to raise? Browse 120 built-in procedural examples across eight categories. Save your favorites, add your own motions and customize suggested wording.
 
-4. In the Supabase SQL Editor, run all three migrations in `supabase/migrations/`:
-   - `202610220001_create_motions.sql`
-   - `202610230001_create_workspace_items.sql`
-   - `202610240001_create_simulator_sessions.sql`
-5. Start the development server with `npm run dev`.
-6. Run `npm run build` to type-check and create the production build.
+### MUN Passport
+Your personal MUN history. Keep track of conferences you've attended, the roles you've taken and the experiences you've collected along the way.
 
-Never commit `.env`, service-role keys, or other secrets. The frontend should only use the Supabase publishable/anon key. Row Level Security policies in the migrations limit each user to their own records.
+### Research Workspace
+Your research headquarters. Save sources, collect information, organize notes and keep everything connected to your conferences.
 
-## Data model
+### Position Papers
+Turn your research into a structured position paper. Start with a template and build your draft directly inside FinalMUN.
 
-- `motions`: private saved motions.
-- `workspace_items`: private conference, passport, note, paper, research, resolution and speech records. Additional structured details are stored in a JSONB `metadata` field.
-- `simulator_sessions`: private saved solo simulator sessions and their current game state.
+### Resolution Builder
+Bring your ideas together. Organize preambulatory and operative clauses and work on your resolutions in one dedicated space.
 
-If Supabase reports that a table does not exist, verify that both SQL migrations were applied successfully in the correct Supabase project.
+### Speech Writer
+Prepare for the floor with dedicated templates for:
+- Opening speeches
+- General Speakers' List speeches
+- Moderated caucuses
+- Closing speeches
+- Responses and rebuttals
 
-## Export notes
+### Calendar
+Keep track of important dates, upcoming conferences and everything happening in your MUN schedule.
 
-- **PDF:** opens a print-ready view; choose “Save as PDF” in the browser print dialog.
-- **Word:** downloads a Word-compatible `.doc` document. It uses a simple document layout and is not a full `.docx` package.
-- Export is performed locally in the browser; no document content is sent to a third-party export service.
+### Personal Notes
+A dedicated place for all your thoughts, ideas and quick notes.
 
-## Email notifications
+### MUN Simulator
+Practice your MUN skills in a solo simulation environment and keep track of your saved sessions.
 
-The user's product-update preference is saved in Supabase user metadata. The app does not send announcement campaigns yet. Configure and test a trusted email provider and server-side sending function before enabling actual outbound announcements. Never put email-provider secrets in frontend environment variables.
+---
 
-## Interface polish update
+## Designed to feel different
 
-This update removes redundant uppercase eyebrow labels from the main app and simulator, simplifies the graphite visual system, reduces decorative gradients and hover movement, standardizes common component radii, and improves small-screen padding. Authentication and existing feature logic were left in place.
+FinalMUN isn't another complicated productivity tool.
 
-### Verification
+It's designed to feel clean, calm and enjoyable to use.
 
-The source archive is valid, but a production build could not be verified in the current environment because `npm ci` timed out and left an incomplete `node_modules` directory. On a development machine, remove `node_modules`, run `npm install`, then `npm run build` before deploying.
+- A beautiful olive-green and creamy visual identity.
+- Minimalist layouts with a modern feel.
+- Smooth animations and subtle transitions.
+- Carefully designed desktop and mobile experiences.
+- Organized navigation that keeps everything within reach.
+
+Every detail is designed to make preparing for MUN feel a little less stressful.
+
+---
+
+## Built with
+
+FinalMUN is powered by:
+
+- React
+- Vite
+- TypeScript
+- Supabase
+- PostgreSQL
+
+## Getting started
+
+Want to run FinalMUN locally? Here's how.
+
+**1. Install dependencies**
+
+```bash
+npm install
+```
+
+**2. Set up your environment**
+
+Copy `.env.example` to `.env` and add your Supabase credentials:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+```
+
+**3. Set up your database**
+
+Open your Supabase SQL Editor and run the migrations inside `supabase/migrations/`:
+
+- `202610220001_create_motions.sql`
+- `202610230001_create_workspace_items.sql`
+- `202610240001_create_simulator_sessions.sql`
+
+**4. Launch FinalMUN**
+
+```bash
+npm run dev
+```
+
+**5. Build for production**
+
+```bash
+npm run build
+```
+
+## Your workspace, your data
+
+Your personal information and workspace records are protected using Supabase authentication and Row Level Security (RLS).
+
+A few important things:
+- Never commit your `.env` file.
+- Never expose service-role keys.
+- Only use your Supabase publishable/anon key in the frontend.
+- Private workspace records are restricted to their owners.
+
+## Exporting your work
+
+Your documents shouldn't be stuck inside an app.
+
+- **PDF:** Generate a print-ready document and save it as PDF through your browser.
+- **Word:** Export saved text documents as Word-compatible `.doc` files.
+
+Exports happen locally in your browser. Your document content isn't sent to an external export service.
+
+## Notifications
+
+You can manage your preferences for product updates through your account.
+
+Actual announcement emails require a separately configured email provider and server-side sending function.
+
+---
+
+## The idea behind FinalMUN
+
+MUN is about research, diplomacy, collaboration and finding your voice.
+
+We think the tools you use should make that experience easier, not more complicated.
+
+**Prepare better. Debate smarter. Make your mark.**
+
+Welcome to FinalMUN.
